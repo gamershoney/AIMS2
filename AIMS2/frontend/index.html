@@ -1,13 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8"/>
-    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <link href="./src/output.css" rel="stylesheet" />
-    <title>AIMS2</title>
+  <meta charset="UTF-8" />
+  <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+  <link href="./src/output.css" rel="stylesheet" />
+  <title>AIMS2</title>
 </head>
-<body>
-<div id="app"></div>
-<script src="./src/main.js" type="module"></script>
+
+<body class="">
+  <div id="app" class="bg-stone-800">
+    <div class="p-5 h-full flex flex-col">
+      <div class="border-b border-b-slate-600">
+        <p class="text-left p-2 text-2xl text-yellow-500">
+          AIMS2
+        </p>
+      </div>
+      <div id="msg-body" class="flex-1">
+        body
+        <msg-entry></msg-entry>
+      </div>
+      <div class="border rounded-2xl border-slate-400 text-slate-300 bg-stone-700 flex place-content-evenly p-2">
+        <textarea id="textinput" class="outline-0 resize-none place-content-center-safe flex-1 pl-3" type="text"
+          placeholder="Ask anything..."></textarea>
+        <button id="sendBtn" class="hover:cursor-pointer">
+          Send
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <template id="message-entry">
+
+    <p class="msg-content text-white text-2xl">
+
+    </p>
+  </template>
+  <script src="./src/main.js" type="module">
+
+  </script>
 </body>
+
 </html>

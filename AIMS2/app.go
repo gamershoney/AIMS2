@@ -25,3 +25,14 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
+
+func (a *App) SendMsg(text string) string {
+	msg := &Chat{Model: defMdoel, KeepAlive: defKeepAlive, Stream: false}
+	msg.AppendMessage("user", text)
+	ansr, err := msg.SendMessage()
+	if err != nil {
+		fmt.Println(fmt.Errorf("error: %s", err))
+		return ""
+	}
+	return ansr.Message.Content
+}

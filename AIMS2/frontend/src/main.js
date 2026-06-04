@@ -1,43 +1,71 @@
 import './style.css';
 import './app.css';
+import * as go from "../wailsjs/go/main/App.js";
 
-import logo from './assets/images/logo-universal.png';
-import {Greet} from '../wailsjs/go/main/App';
+const body = document.getElementById("msg-body");
+const msg = document.getElementById("message-entry");
+const sndBtn = document.getElementById("sendBtn");
+const input = document.getElementById("textinput");
 
-document.querySelector('#app').innerHTML = `
-    <img id="logo" class="logo">
-      <div class="result" id="result">Please enter your name below 👇</div>
-      <div class="input-box" id="input">
-        <input class="input" id="name" type="text" autocomplete="off" />
-        <button class="btn" onclick="greet()">Greet</button>
-      </div>
-    </div>
-`;
-document.getElementById('logo').src = logo;
+customElements.define("msg-entry", class extends HTMLElement {
+  constructor() {
+    super();
 
-let nameElement = document.getElementById("name");
-nameElement.focus();
-let resultElement = document.getElementById("result");
+    this.contentElement = null;
+    this.messageText = "";
+    this.hasRendered = false;
+  }
 
-// Setup the greet function
-window.greet = function () {
-    // Get name
-    let name = nameElement.value;
-
-    // Check if the input is empty
-    if (name === "") return;
-
-    // Call App.Greet(name)
-    try {
-        Greet(name)
-            .then((result) => {
-                // Update result with data back from App.Greet()
-                resultElement.innerText = result;
-            })
-            .catch((err) => {
-                console.error(err);
-            });
-    } catch (err) {
-        console.error(err);
+  connectedCallback() {
+    if (this.hasRendered) {
+      return;
     }
-};
+
+    const template = msg.content.cloneNode(true);
+    this.appendChild(template);
+
+    this.contentElement = this.querySelector(".msg-content");
+    this.contentElement.innerText = this.messageText;
+
+    this.hasRendered = true;
+  }
+
+  setText(text = "") {
+    this.messageText = text;
+
+    if (this.contentElement) {
+      this.contentElement.innerText = text;
+    }
+  }
+});
+
+function addMessage(text = "") {
+  const msgEntry = document.createElement("msg-entry");
+
+  msgEntry.setText(text);
+
+  body.appendChild(msgEntry);
+
+  body.scrollTop = body.scrollHeight;
+}
+
+async function SendMessage() {
+  const text = input.value.trim();
+
+  if (text === "") {
+    return;
+  }
+
+  addMessage(text);
+  input.value = "";
+
+  try {
+    const response = await go.SendMsg(text);
+    addMessage(response);
+  } catch (error) {
+    console.error(error);
+    addMessage("Error contacting model.");
+  }
+}
+
+sndBtn.addEventListener("click", SendMessage);
