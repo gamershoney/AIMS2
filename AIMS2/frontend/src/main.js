@@ -7,6 +7,11 @@ const msg = document.getElementById("message-entry");
 const sndBtn = document.getElementById("sendBtn");
 const input = document.getElementById("textinput");
 
+const faction = {
+  assistant: "assistant",
+  user: "user"
+}
+
 customElements.define("msg-entry", class extends HTMLElement {
   constructor() {
     super();
@@ -14,6 +19,7 @@ customElements.define("msg-entry", class extends HTMLElement {
     this.contentElement = null;
     this.messageText = "";
     this.hasRendered = false;
+    this.faction = null
   }
 
   connectedCallback() {
@@ -26,13 +32,16 @@ customElements.define("msg-entry", class extends HTMLElement {
 
     this.contentElement = this.querySelector(".msg-content");
     this.contentElement.innerText = this.messageText;
-
+    if (this.faction) {
+      this.contentElement.classList.add(this.faction)
+    }
     this.hasRendered = true;
   }
 
-  setText(text = "") {
+  setText(text = "", fact) {
     this.messageText = text;
-
+    this.faction = fact
+    console.log("Faction: ", fact)
     if (this.contentElement) {
       this.contentElement.innerText = text;
     }
@@ -42,7 +51,7 @@ customElements.define("msg-entry", class extends HTMLElement {
 function addMessage(text = "", faction) {
   const msgEntry = document.createElement("msg-entry");
 
-  msgEntry.setText(text);
+  msgEntry.setText(text, faction);
 
   body.appendChild(msgEntry);
 
@@ -56,19 +65,19 @@ async function SendMessage() {
     return;
   }
 
-  addMessage(text);
+  addMessage(text, faction.user);
   input.value = "";
 
   try {
     const response = await go.SendMsg(text);
-    addMessage(response);
+    addMessage(response, faction.assistant);
   } catch (error) {
     console.error(error);
-    addMessage("Error contacting model.");
+    addMessage("Error contacting model.", faction.assistant);
   }
 }
 
 sndBtn.addEventListener("click", SendMessage);
 
-addMessage("Good morning!")
-addMessage("Good morning!")
+addMessage("Good morning!", faction.assistant)
+addMessage("Good morning!", faction.user)

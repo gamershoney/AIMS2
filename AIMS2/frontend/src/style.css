@@ -21,6 +21,10 @@ html {
 }
 
 @layer components {
+  .msg-entry {
+    display: block;
+  }
+
   .assistant {
     background-color: var(--color-slate-600);
     border-bottom-left-radius: var(--radius-sm) !important;
@@ -30,5 +34,9 @@ html {
 
   .user {
     background-color: var(--color-blue-800);
+    border-bottom-right-radius: var(--radius-sm) !important;
+    border-radius: var(--radius-xl);
+    text-align: left;
+    margin-left: auto;
   }
 }

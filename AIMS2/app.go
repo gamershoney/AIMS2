@@ -7,12 +7,14 @@ import (
 
 // App struct
 type App struct {
-	ctx context.Context
+	ctx    context.Context
+	Thread *Chat
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	newChat := &Chat{Model: defMdoel, KeepAlive: defKeepAlive, Stream: false}
+	return &App{Thread: newChat}
 }
 
 // startup is called when the app starts. The context is saved
@@ -27,7 +29,7 @@ func (a *App) Greet(name string) string {
 }
 
 func (a *App) SendMsg(text string) string {
-	msg := &Chat{Model: defMdoel, KeepAlive: defKeepAlive, Stream: false}
+	msg := a.Thread
 	msg.AppendMessage("user", text)
 	ansr, err := msg.SendMessage()
 	if err != nil {
