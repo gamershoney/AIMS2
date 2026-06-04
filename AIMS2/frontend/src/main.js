@@ -69,3 +69,6 @@ async function SendMessage() {
 }
 
 sndBtn.addEventListener("click", SendMessage);
+
+addMessage("Good morning!")
+addMessage("Good morning!")

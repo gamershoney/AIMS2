@@ -19,3 +19,13 @@ html {
   height: 100vh;
   text-align: center;
 }
+
+@layer components {
+  .assistant {
+    background-color: var(--color-slate-600);
+  }
+
+  .user {
+    background-color: var(--color-blue-800);
+  }
+}

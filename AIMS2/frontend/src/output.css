@@ -7,12 +7,11 @@
       "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
-    --color-red-500: oklch(63.7% 0.237 25.331);
     --color-yellow-500: oklch(79.5% 0.184 86.047);
+    --color-blue-800: oklch(42.4% 0.199 265.638);
     --color-slate-300: oklch(86.9% 0.022 252.894);
     --color-slate-400: oklch(70.4% 0.04 256.788);
     --color-slate-600: oklch(44.6% 0.043 257.281);
-    --color-slate-700: oklch(37.2% 0.044 257.287);
     --color-stone-700: oklch(37.4% 0.01 67.558);
     --color-stone-800: oklch(26.8% 0.007 34.298);
     --color-white: #fff;
@@ -246,6 +245,11 @@
     outline-style: var(--tw-outline-style);
     outline-width: 0px;
   }
+  .\*\:mb-3 {
+    :is(& > *) {
+      margin-bottom: calc(var(--spacing) * 3);
+    }
+  }
   .hover\:cursor-pointer {
     &:hover {
       @media (hover: hover) {
@@ -266,6 +270,14 @@ html {
 #app {
   height: 100vh;
   text-align: center;
+}
+@layer components {
+  .assistant {
+    background-color: var(--color-slate-600);
+  }
+  .user {
+    background-color: var(--color-blue-800);
+  }
 }
 @property --tw-border-style {
   syntax: "*";
