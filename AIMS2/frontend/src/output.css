@@ -18,6 +18,8 @@
     --spacing: 0.25rem;
     --text-2xl: 1.5rem;
     --text-2xl--line-height: calc(2 / 1.5);
+    --radius-sm: 0.25rem;
+    --radius-xl: 0.75rem;
     --radius-2xl: 1rem;
     --default-font-family: var(--font-sans);
     --default-mono-font-family: var(--font-mono);
@@ -245,9 +247,14 @@
     outline-style: var(--tw-outline-style);
     outline-width: 0px;
   }
-  .\*\:mb-3 {
-    :is(& > *) {
-      margin-bottom: calc(var(--spacing) * 3);
+  .\*\*\:mb-5 {
+    :is(& *) {
+      margin-bottom: calc(var(--spacing) * 5);
+    }
+  }
+  .\*\*\:rounded-2xl {
+    :is(& *) {
+      border-radius: var(--radius-2xl);
     }
   }
   .hover\:cursor-pointer {
@@ -274,6 +281,7 @@ html {
 @layer components {
   .assistant {
     background-color: var(--color-slate-600);
+    border-bottom-left-radius: var(--radius-sm);
   }
   .user {
     background-color: var(--color-blue-800);

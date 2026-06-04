@@ -39,7 +39,7 @@ customElements.define("msg-entry", class extends HTMLElement {
   }
 });
 
-function addMessage(text = "") {
+function addMessage(text = "", faction) {
   const msgEntry = document.createElement("msg-entry");
 
   msgEntry.setText(text);
