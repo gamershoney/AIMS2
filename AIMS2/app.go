@@ -38,3 +38,7 @@ func (a *App) SendMsg(text string) string {
 	}
 	return ansr.Message.Content
 }
+
+func (a *App) ClearChat() {
+	a.Thread = &Chat{Model: defMdoel, KeepAlive: defKeepAlive, Stream: false}
+}
