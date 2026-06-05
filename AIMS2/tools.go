@@ -57,3 +57,5 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (any,
 	}
 	return rs(), nil
 }
+
+func RunWebSearch(qry string)
