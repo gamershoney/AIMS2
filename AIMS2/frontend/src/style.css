@@ -23,7 +23,7 @@ html {
 @layer components {
   .hidden {
     display: none !important;
-    ;
+
   }
 
   .msg-entry {
