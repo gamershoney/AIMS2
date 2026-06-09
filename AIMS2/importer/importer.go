@@ -42,5 +42,17 @@ func TestOpen() error {
 		index += 1
 	}
 
+	db, err := OpenDB()
+	if err != nil {
+		fmt.Println("error: opening database, ", err)
+		fmt.Println()
+	}
+
 	return nil
+}
+
+func LoadSheet(location string) (*excelize.File, error) {
+	//l := location
+	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
+	return f, err
 }
