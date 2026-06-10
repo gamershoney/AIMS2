@@ -11,6 +11,7 @@ var TableName string = "inventory"
 
 type InventoryItem struct {
 	ID               int
+	Location         int
 	StockNumber      string
 	Description      string
 	VendorNumber     string
@@ -69,6 +70,7 @@ func OpenDB() (*sql.DB, error) {
 func AddInventory(db *sql.DB, i []InventoryItem) error {
 	istmt := fmt.Sprintf(`INSERT INTO %s(
 	id,
+	location,
 	stock_number,
   description,
   vendor_number,
@@ -80,7 +82,7 @@ func AddInventory(db *sql.DB, i []InventoryItem) error {
   avg_usage,
   last_sale,
   last_receipt,
-  last_order) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, TableName)
+  last_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, TableName)
 	prep, err := db.Prepare(istmt)
 	if err != nil {
 		return err

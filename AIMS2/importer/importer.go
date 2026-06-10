@@ -51,8 +51,41 @@ func TestOpen() error {
 	return nil
 }
 
-func LoadSheet(location string) (*excelize.File, error) {
+func LoadSheet(location string) ([]InventoryItem, error) {
 	//l := location
 	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
+	defer func() {
+		err := f.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
+	if err != nil {
+		return nil, err
+	}
+	sheet := f.GetSheetName(0)
+	if sheet == "" {
+		return nil, fmt.Errorf("No sheet at index")
+	}
+	indexes := make(map[string]int)
+	rows, err := f.Rows(sheet)
+	if rows.Next() {
+		row, err := rows.Columns()
+		for i, v := range row {
+			indexes[v] = i
+		}
+	}
+
+	for rows.Next() {
+		item := &InventoryItem{}
+		row, err := rows.Columns()
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		for i, cell := range row {
+		}
+	}
+
 	return f, err
 }
