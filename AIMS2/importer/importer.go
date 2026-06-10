@@ -3,55 +3,32 @@ package importer
 
 import (
 	"fmt"
+	"strconv"
 
 	excelize "github.com/xuri/excelize/v2"
 )
 
 func TestOpen() error {
-	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
-	if err != nil {
-		return fmt.Errorf("error: package importer: %v", err)
-	}
-	defer func() {
-		if err != nil {
-			fmt.Println("Error on closing spreadsheet for read: ", err)
-		}
-	}()
-	sheet := f.GetSheetName(0)
-	if sheet == "" {
-		return fmt.Errorf("error: Sheet index 0 not found")
-	}
-
-	rows, err := f.Rows(sheet)
-	if err != nil {
-		return fmt.Errorf("error: %v", err)
-	}
-	index := 0
-	for rows.Next() && index < 49 {
-		row, err := rows.Columns()
-		if err != nil {
-			return fmt.Errorf("error: %v", err)
-		}
-		for i, cell := range row {
-			if i > 5 {
-				break
-			}
-			fmt.Printf("%s \t", cell)
-		}
-		fmt.Println()
-		index += 1
-	}
-
 	db, err := OpenDB()
 	if err != nil {
 		fmt.Println("error: opening database, ", err)
 		fmt.Println()
+		return err
 	}
 
-	return nil
+	items, err := LoadSheet("")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+	for _, v := range items {
+		fmt.Printf("Location: %d\t StockNumber: %s\t LastOrder:%s\n", v.Location, v.StockNumber, v.LastOrder)
+	}
+	err = AddInventory(db, items)
+	return err
 }
 
-func LoadSheet(location string) ([]InventoryItem, error) {
+func LoadSheet(location string) ([]*InventoryItem, error) {
 	//l := location
 	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
 	defer func() {
@@ -65,17 +42,20 @@ func LoadSheet(location string) ([]InventoryItem, error) {
 	}
 	sheet := f.GetSheetName(0)
 	if sheet == "" {
-		return nil, fmt.Errorf("No sheet at index")
+		return nil, fmt.Errorf("error: no sheet at index")
 	}
 	indexes := make(map[string]int)
 	rows, err := f.Rows(sheet)
 	if rows.Next() {
 		row, err := rows.Columns()
+		if err != nil {
+			return nil, err
+		}
 		for i, v := range row {
 			indexes[v] = i
 		}
 	}
-
+	var items []*InventoryItem
 	for rows.Next() {
 		item := &InventoryItem{}
 		row, err := rows.Columns()
@@ -83,9 +63,21 @@ func LoadSheet(location string) ([]InventoryItem, error) {
 			fmt.Println(err)
 			return nil, err
 		}
-		for i, cell := range row {
-		}
+		item.Location, _ = strconv.Atoi(row[indexes["Location"]])
+		item.StockNumber = row[indexes["Stock_Number"]]
+		item.Description = row[indexes["Description"]]
+		item.VendorNumber = row[indexes["Vendor_Number"]]
+		item.VendorProdNumber = row[indexes["Vendor_Prod_Number"]]
+		item.Unit = row[indexes["Unit"]]
+		item.Price, _ = strconv.Atoi(row[indexes["Price"]])
+		item.Cost, _ = strconv.Atoi(row[indexes["Unit_Replace_Cost"]])
+		item.OnHand, _ = strconv.Atoi(row[indexes["On_Hand"]])
+		item.Usage, _ = strconv.Atoi(row[indexes["Avg_Usage"]])
+		item.LastSale = row[indexes["Date_Last_Issue"]]
+		item.LastReceipt = row[indexes["Date_Last_Receipt"]]
+		item.LastOrder = row[indexes["Date_Last_Order"]]
+		items = append(items, item)
 	}
 
-	return f, err
+	return items, err
 }

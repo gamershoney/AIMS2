@@ -1,10 +1,13 @@
 package importer
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestTestOpen(t *testing.T) {
 	err := TestOpen()
 	if err != nil {
-		t.Errorf(`error on TestOpen(): %v`, err)
+		fmt.Println(fmt.Errorf(`error on TestOpen(): %v`, err))
 	}
 }

@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+
+	_ "modernc.org/sqlite"
 )
 
 var TableName string = "inventory"
@@ -32,11 +34,13 @@ var dbSQL string
 func OpenDB() (*sql.DB, error) {
 	db, err := sql.Open("sqlite", "./inventory.db")
 	if err != nil {
+		err = errors.New("could not connect to DB")
 		return nil, err
 	}
 
 	if err = db.Ping(); err != nil {
-		return nil, err
+		fmt.Println("DB not connected")
+		return nil, fmt.Errorf("error pinging db: %v", err)
 	}
 
 	if dbSQL == "" {
@@ -52,12 +56,7 @@ func OpenDB() (*sql.DB, error) {
 			fmt.Println(err)
 		}
 	}()
-	defer func() {
-		err := db.Close()
-		if err != nil {
-			fmt.Println(err)
-		}
-	}()
+
 	_, err = schema.Exec()
 	if err != nil {
 		return nil, err
@@ -67,9 +66,9 @@ func OpenDB() (*sql.DB, error) {
 	return db, err
 }
 
-func AddInventory(db *sql.DB, i []InventoryItem) error {
+func AddInventory(db *sql.DB, i []*InventoryItem) error {
 	istmt := fmt.Sprintf(`INSERT INTO %s(
-	id,
+
 	location,
 	stock_number,
   description,
@@ -82,7 +81,7 @@ func AddInventory(db *sql.DB, i []InventoryItem) error {
   avg_usage,
   last_sale,
   last_receipt,
-  last_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, TableName)
+  last_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, TableName)
 	prep, err := db.Prepare(istmt)
 	if err != nil {
 		return err
@@ -94,9 +93,10 @@ func AddInventory(db *sql.DB, i []InventoryItem) error {
 		}
 	}()
 
-	for id, item := range i {
+	for _, item := range i {
 		if _, err := prep.Exec(
-			id+1,
+
+			item.Location,
 			item.StockNumber,
 			item.Description,
 			item.VendorNumber,
@@ -109,7 +109,7 @@ func AddInventory(db *sql.DB, i []InventoryItem) error {
 			item.LastReceipt,
 			item.LastOrder,
 		); err != nil {
-			return err
+			return fmt.Errorf("error adding item to db on item %d\t%s:\n %v", item.Location, item.StockNumber, err)
 		}
 	}
 	return err

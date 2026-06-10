@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  location REAL NOT NULL,
   stock_number TEXT NOT NULL,
   description TEXT NOT NULL,
   vendor_number TEXT NOT NULL,
@@ -11,11 +12,11 @@ CREATE TABLE IF NOT EXISTS inventory (
   avg_usage REAL,
   last_sale TEXT,
   last_receipt TEXT,
-  last_order TEXT,
+  last_order TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_inventory_stock_number
 ON inventory(stock_number);
 
 CREATE INDEX IF NOT EXISTS idx_inventory_description
-ON inventory(description)
+ON inventory(description);
