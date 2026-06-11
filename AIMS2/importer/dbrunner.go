@@ -100,6 +100,7 @@ func AddInventory(db *sql.DB, i []*InventoryItem) error {
 			item.StockNumber,
 			item.Description,
 			item.VendorNumber,
+			item.VendorProdNumber,
 			item.Unit,
 			item.Price,
 			item.Cost,
@@ -109,7 +110,7 @@ func AddInventory(db *sql.DB, i []*InventoryItem) error {
 			item.LastReceipt,
 			item.LastOrder,
 		); err != nil {
-			return fmt.Errorf("error adding item to db on item %d\t%s:\n %v", item.Location, item.StockNumber, err)
+			return fmt.Errorf("error adding item to db on item %d\t%s:\t LastOrder: %s, error:%v", item.Location, item.StockNumber, item.LastOrder, err)
 		}
 	}
 	return err

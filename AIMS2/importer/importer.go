@@ -28,6 +28,37 @@ func TestOpen() error {
 	return err
 }
 
+func NewItem() *InventoryItem {
+	item := &InventoryItem{
+		Location:         0,
+		StockNumber:      "null",
+		Description:      "null",
+		VendorNumber:     "null",
+		VendorProdNumber: "null",
+		Unit:             "null",
+		Price:            0,
+		Cost:             0,
+		OnHand:           0,
+		Usage:            0,
+		LastSale:         "null",
+		LastReceipt:      "null",
+		LastOrder:        "null",
+	}
+	return item
+}
+
+func getCell(row []string, indexes map[string]int, item string) string {
+	index, ok := indexes[item]
+	if !ok {
+		return "0"
+	}
+	value := row[index]
+	if value == "" {
+		return "0"
+	}
+	return value
+}
+
 func LoadSheet(location string) ([]*InventoryItem, error) {
 	//l := location
 	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
@@ -57,25 +88,25 @@ func LoadSheet(location string) ([]*InventoryItem, error) {
 	}
 	var items []*InventoryItem
 	for rows.Next() {
-		item := &InventoryItem{}
+		item := NewItem()
 		row, err := rows.Columns()
 		if err != nil {
 			fmt.Println(err)
 			return nil, err
 		}
-		item.Location, _ = strconv.Atoi(row[indexes["Location"]])
-		item.StockNumber = row[indexes["Stock_Number"]]
-		item.Description = row[indexes["Description"]]
-		item.VendorNumber = row[indexes["Vendor_Number"]]
-		item.VendorProdNumber = row[indexes["Vendor_Prod_Number"]]
-		item.Unit = row[indexes["Unit"]]
-		item.Price, _ = strconv.Atoi(row[indexes["Price"]])
-		item.Cost, _ = strconv.Atoi(row[indexes["Unit_Replace_Cost"]])
-		item.OnHand, _ = strconv.Atoi(row[indexes["On_Hand"]])
-		item.Usage, _ = strconv.Atoi(row[indexes["Avg_Usage"]])
-		item.LastSale = row[indexes["Date_Last_Issue"]]
-		item.LastReceipt = row[indexes["Date_Last_Receipt"]]
-		item.LastOrder = row[indexes["Date_Last_Order"]]
+		item.Location, _ = strconv.Atoi(getCell(row, indexes, "Location"))
+		item.StockNumber = getCell(row, indexes, "Stock_Number")
+		item.Description = getCell(row, indexes, "Description")
+		item.VendorNumber = getCell(row, indexes, "Vendor_Number")
+		item.VendorProdNumber = getCell(row, indexes, "Vendor_Prod_Number")
+		item.Unit = getCell(row, indexes, "Unit")
+		item.Price, _ = strconv.Atoi(getCell(row, indexes, "Price"))
+		item.Cost, _ = strconv.Atoi(getCell(row, indexes, "Unit_Replace_Cost"))
+		item.OnHand, _ = strconv.Atoi(getCell(row, indexes, "On_Hand"))
+		item.Usage, _ = strconv.Atoi(getCell(row, indexes, "Avg_Usage"))
+		item.LastSale = getCell(row, indexes, "Date_Last_Issue")
+		item.LastReceipt = getCell(row, indexes, "Date_Last_Receipt")
+		item.LastOrder = getCell(row, indexes, "Date_Last_Order")
 		items = append(items, item)
 	}
 
