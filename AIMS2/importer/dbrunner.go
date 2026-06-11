@@ -115,3 +115,26 @@ func AddInventory(db *sql.DB, i []*InventoryItem) error {
 	}
 	return err
 }
+
+type InventoryLookUpArgs struct {
+	Query    string `json:"query"`
+	Location string `json:"location,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
+}
+type ReturnResult struct {
+	Item            InventoryItem
+	ConfidenceScore int    `json:"confidence_score"`
+	MatchType       string `json:"match_type"`
+}
+
+const (
+	ConfidenceExactStockNumber      = 100
+	ConfidenceExactVendorPartNumber = 95
+	ConfidencePartialStockNumber    = 85
+	ConfidenceDescriptionAllWords   = 60
+	ConfidenceDescriptionAnyWord    = 35
+)
+
+func SearchInventory(args InventoryLookUpArgs, db *sql.DB) (map[InventoryItem]int, error) {
+	return nil, nil
+}
