@@ -135,6 +135,71 @@ const (
 	ConfidenceDescriptionAnyWord    = 35
 )
 
-func SearchInventory(args InventoryLookUpArgs, db *sql.DB) (map[InventoryItem]int, error) {
-	return nil, nil
+type InvenentoryLookup struct {
+	db      *sql.DB
+	Args    InventoryLookUpArgs
+	Results []*ReturnResult
+}
+
+func (il *InvenentoryLookup) checkStockNumber() ([]*ReturnResult, error) {
+	db := il.db
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	stmt, err := db.Prepare("SELECT location,stock_number,description,on_hand FROM inventory WHERE stock_number=? AND location=? LIMIT ?")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err := stmt.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
+	rows, err := stmt.Query(il.Args.Query, il.Args.Location, il.Args.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err := rows.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
+	var ra []*ReturnResult
+
+	for rows.Next() {
+		fmt.Println("Reading row...")
+		item := &InventoryItem{}
+		err := rows.Scan(&item.Location, &item.StockNumber, &item.Description, &item.OnHand)
+		if err != nil {
+			fmt.Println("Error on scanning rows")
+			return nil, err
+		}
+		rr := &ReturnResult{
+			Item:            *item,
+			ConfidenceScore: ConfidenceExactStockNumber,
+			MatchType:       "Exact Stock Number",
+		}
+		ra = append(ra, rr)
+		fmt.Printf("Appended %+v\n", rr)
+	}
+	return ra, nil
+}
+
+func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
+	db, err := OpenDB()
+	if err != nil {
+		return nil, err
+	}
+	il := &InvenentoryLookup{
+		db:   db,
+		Args: args,
+	}
+	result, err := il.checkStockNumber()
+	if err != nil {
+		return nil, err
+	}
+	il.Results = append(il.Results, result...)
+	return il.Results, err
 }

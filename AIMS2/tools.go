@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	"AIMS2/importer"
+	_ "AIMS2/importer"
 )
 
 const apiEndpoint = "https://ollama.com/api/web_search"
@@ -185,4 +189,59 @@ func RunWebSearch(qry string) (string, error) {
 
 	//	strQry := fmt.Sprintf("%v", qryReturn)
 	return strQry.String(), nil
+}
+
+type StockCheck struct {
+	db *sql.DB
+}
+
+func (t *StockCheck) Name() string {
+	return "stock_check"
+}
+
+func (t *StockCheck) Description() string {
+	return "use when to check if our company stocks an item by part number. Will return an item with the location it was found in, the part number found, the description of the item, how many are on hand, a confidence score with a minimum of 0 and a maximum of 100, and how the item was matched."
+}
+
+func (t *StockCheck) Parameters() Parameters {
+	return Parameters{
+		Type: "object",
+		Properties: map[string]Property{
+			"part_number": {Type: "string", Description: "Enter the exact part number you would like to search our inventory for."},
+		},
+		Required: []string{"Part number"},
+	}
+}
+
+func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) string {
+	var build strings.Builder
+	for _, v := range results {
+		result := fmt.Sprintf("%+v, ", v)
+		_, err := build.WriteString(result)
+		if err != nil {
+			fmt.Printf("error on building results inventory data string: %v", err)
+		}
+	}
+	return build.String()
+}
+
+func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	qry := tc.Function.Arguments["part_number"]
+	tr := ToolResult{Name: tc.Function.Name}
+	qs, ok := qry.(string)
+
+	if !ok {
+		tr.Error = errors.New("error: could not find args in stock search")
+		return tr
+	}
+	rs := func() (string, error) {
+		si, err := importer.SearchInventory(importer.InventoryLookUpArgs{Query: qs, Location: "1", Limit: 10})
+		if err != nil {
+			fmt.Println(err)
+		}
+		result := t.ParseInventoryData(si)
+		return result, err
+	}
+	tr.Response, tr.Error = rs()
+	return tr
 }

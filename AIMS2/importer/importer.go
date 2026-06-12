@@ -16,7 +16,7 @@ func TestOpen() error {
 		return err
 	}
 
-	items, err := LoadSheet("")
+	items, err := loadSheet("")
 	if err != nil {
 		fmt.Println(err)
 		return err
@@ -59,7 +59,7 @@ func getCell(row []string, indexes map[string]int, item string) string {
 	return value
 }
 
-func LoadSheet(location string) ([]*InventoryItem, error) {
+func loadSheet(location string) ([]*InventoryItem, error) {
 	//l := location
 	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
 	defer func() {
