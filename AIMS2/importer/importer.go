@@ -22,7 +22,7 @@ func TestOpen() error {
 		return err
 	}
 	for _, v := range items {
-		fmt.Printf("Location: %d\t StockNumber: %s\t LastOrder:%s\n", v.Location, v.StockNumber, v.LastOrder)
+		fmt.Printf("Location: %f\t StockNumber: %s\t LastOrder:%s\t Price: %f\n", v.Location, v.StockNumber, v.LastOrder, v.Price)
 	}
 	err = AddInventory(db, items)
 	return err
@@ -50,10 +50,12 @@ func NewItem() *InventoryItem {
 func getCell(row []string, indexes map[string]int, item string) string {
 	index, ok := indexes[item]
 	if !ok {
+		fmt.Printf("cell search: %s, returned not found\n", item)
 		return "0"
 	}
 	value := row[index]
 	if value == "" {
+		fmt.Printf("cell search : %s found but returned an empty value\n", item)
 		return "0"
 	}
 	return value
@@ -94,16 +96,16 @@ func loadSheet(location string) ([]*InventoryItem, error) {
 			fmt.Println(err)
 			return nil, err
 		}
-		item.Location, _ = strconv.Atoi(getCell(row, indexes, "Location"))
+		item.Location, _ = strconv.ParseFloat(getCell(row, indexes, "Location"), 64)
 		item.StockNumber = getCell(row, indexes, "Stock_Number")
 		item.Description = getCell(row, indexes, "Description")
 		item.VendorNumber = getCell(row, indexes, "Vendor_Number")
-		item.VendorProdNumber = getCell(row, indexes, "Vendor_Prod_Number")
+		item.VendorProdNumber = getCell(row, indexes, "Vendor_Prod_Num")
 		item.Unit = getCell(row, indexes, "Unit")
-		item.Price, _ = strconv.Atoi(getCell(row, indexes, "Price"))
-		item.Cost, _ = strconv.Atoi(getCell(row, indexes, "Unit_Replace_Cost"))
-		item.OnHand, _ = strconv.Atoi(getCell(row, indexes, "On_Hand"))
-		item.Usage, _ = strconv.Atoi(getCell(row, indexes, "Avg_Usage"))
+		item.Price, _ = strconv.ParseFloat(getCell(row, indexes, "Price"), 64)
+		item.Cost, _ = strconv.ParseFloat(getCell(row, indexes, "Unit_Replace_Cost"), 64)
+		item.OnHand, _ = strconv.ParseFloat(getCell(row, indexes, "On_Hand"), 64)
+		item.Usage, _ = strconv.ParseFloat(getCell(row, indexes, "Avg_Usage"), 64)
 		item.LastSale = getCell(row, indexes, "Date_Last_Issue")
 		item.LastReceipt = getCell(row, indexes, "Date_Last_Receipt")
 		item.LastOrder = getCell(row, indexes, "Date_Last_Order")

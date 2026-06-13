@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -13,16 +15,16 @@ var TableName string = "inventory"
 
 type InventoryItem struct {
 	ID               int
-	Location         int
+	Location         float64
 	StockNumber      string
 	Description      string
 	VendorNumber     string
 	VendorProdNumber string
 	Unit             string
-	Price            int
-	Cost             int
-	OnHand           int
-	Usage            int
+	Price            float64
+	Cost             float64
+	OnHand           float64
+	Usage            float64
 	LastSale         string
 	LastReceipt      string
 	LastOrder        string
@@ -32,7 +34,7 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./importer/inventory.db")
+	db, err := sql.Open("sqlite", "./inventory.db")
 	if err != nil {
 		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")
@@ -111,7 +113,7 @@ func AddInventory(db *sql.DB, i []*InventoryItem) error {
 			item.LastReceipt,
 			item.LastOrder,
 		); err != nil {
-			return fmt.Errorf("error adding item to db on item %d\t%s:\t LastOrder: %s, error:%v", item.Location, item.StockNumber, item.LastOrder, err)
+			return fmt.Errorf("error adding item to db on item %f\t%s:\t LastOrder: %s, error:%v", item.Location, item.StockNumber, item.LastOrder, err)
 		}
 	}
 	return err
@@ -132,6 +134,7 @@ const (
 	ConfidenceExactStockNumber      = 100
 	ConfidenceExactVendorPartNumber = 95
 	ConfidencePartialStockNumber    = 85
+	ConfidenceLowPartialStockNumber = 70
 	ConfidenceDescriptionAllWords   = 60
 	ConfidenceDescriptionAnyWord    = 35
 )
@@ -142,12 +145,12 @@ type InvenentoryLookup struct {
 	Results []*ReturnResult
 }
 
-func (il *InvenentoryLookup) checkStockNumber() ([]*ReturnResult, error) {
+func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 	db := il.db
 	if err := db.Ping(); err != nil {
 		return nil, err
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,description,on_hand FROM inventory WHERE stock_number=? AND location=? LIMIT ?")
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number=? AND location=? LIMIT ?")
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +175,18 @@ func (il *InvenentoryLookup) checkStockNumber() ([]*ReturnResult, error) {
 	for rows.Next() {
 		fmt.Println("Reading row...")
 		item := &InventoryItem{}
-		err := rows.Scan(&item.Location, &item.StockNumber, &item.Description, &item.OnHand)
+		err := rows.Scan(&item.Location,
+			&item.StockNumber,
+			&item.VendorNumber,
+			&item.VendorProdNumber,
+			&item.Description,
+			&item.OnHand,
+			&item.Price,
+			&item.Cost,
+			&item.Usage,
+			&item.LastSale,
+			&item.LastReceipt,
+			&item.LastOrder)
 		if err != nil {
 			fmt.Println("Error on scanning rows")
 			return nil, err
@@ -188,6 +202,94 @@ func (il *InvenentoryLookup) checkStockNumber() ([]*ReturnResult, error) {
 	return ra, nil
 }
 
+func Tokenize(s string) []string {
+	up := strings.ToUpper(strings.TrimSpace(s))
+	var tokens []string
+	var b strings.Builder
+
+	for i, v := range up {
+		if unicode.IsDigit(v) || unicode.IsLetter(v) {
+			if b.Len() > 5 || i == (b.Len()-1) {
+				b.WriteRune(v)
+				tokens = append(tokens, b.String())
+				b.Reset()
+			} else {
+				b.WriteRune(v)
+			}
+		} else {
+			tokens = append(tokens, b.String())
+			b.Reset()
+		}
+	}
+	for _, v := range tokens {
+		v = "%" + v + "%"
+	}
+	return tokens
+}
+
+func (il *InvenentoryLookup) partialQuery(s string, stmt *sql.Stmt, limit int, confidence int, reason string) {
+	rows, err := stmt.Query(s, limit)
+	if err != nil {
+		return
+	}
+
+	for rows.Next() {
+		fmt.Println("Reading row...")
+		item := &InventoryItem{}
+		err := rows.Scan(&item.Location,
+			&item.StockNumber,
+			&item.VendorNumber,
+			&item.VendorProdNumber,
+			&item.Description,
+			&item.OnHand,
+			&item.Price,
+			&item.Cost,
+			&item.Usage,
+			&item.LastSale,
+			&item.LastReceipt,
+			&item.LastOrder)
+		if err != nil {
+			fmt.Println("Error on scanning rows")
+			return
+		}
+		rr := &ReturnResult{
+			Item:            *item,
+			ConfidenceScore: confidence,
+			MatchType:       reason,
+		}
+		il.Results = append(il.Results, rr)
+
+	}
+}
+
+func (il *InvenentoryLookup) checkPartialStockNumber() ([]*ReturnResult, error) {
+	db := il.db
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number LIKE ? LIMIT ?")
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			fmt.Println(err)
+		}
+	}()
+	qry := il.Args.Query
+	tokens := Tokenize(qry)
+	var rr []*ReturnResult
+
+	for _, v := range tokens {
+		switch {
+		case len(v) > 2:
+			il.partialQuery(v, stmt, 10, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
+			break
+		case len(v) <= 2:
+
+		}
+	}
+
+	return nil, nil
+}
+
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 	fmt.Printf("Checking for: %+v\n", args)
 	db, err := OpenDB()
@@ -199,7 +301,7 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		db:   db,
 		Args: args,
 	}
-	result, err := il.checkStockNumber()
+	result, err := il.checkExactStockNumber()
 	if err != nil {
 		return nil, err
 	}

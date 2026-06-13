@@ -199,7 +199,7 @@ func (t *StockCheck) Name() string {
 }
 
 func (t *StockCheck) Description() string {
-	return "use when to check if our company stocks an item by part number. Will return an item with the location it was found in, the part number found, the description of the item, how many are on hand, a confidence score with a minimum of 0 and a maximum of 100, and how the item was matched."
+	return "use when to check if our company stocks an item by part number. Will return an item with the location it was found in, the part number found, the description of the item, how many are on hand,  a confidence score with a minimum of 0 and a maximum of 100, and how the item was matched along with other useful information."
 }
 
 func (t *StockCheck) Parameters() Parameters {

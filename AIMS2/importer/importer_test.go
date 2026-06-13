@@ -4,6 +4,13 @@ import (
 	"testing"
 )
 
+func TestTestOpen(t *testing.T) {
+	err := TestOpen()
+	if err != nil {
+		t.Error(err)
+	}
+}
+
 func TestSearchInventoryByStockNumber(t *testing.T) {
 	results, err := SearchInventory(InventoryLookUpArgs{
 		Query:    "3M-16114",
@@ -25,7 +32,7 @@ func TestSearchInventoryByStockNumber(t *testing.T) {
 	}
 
 	if got.Item.Location != 1 {
-		t.Fatalf("expected location 1, got %d", got.Item.Location)
+		t.Fatalf("expected location 1, got %f", got.Item.Location)
 	}
 
 	t.Logf("found item: %+v", got)
