@@ -15,22 +15,25 @@ const (
 	defMdoel     = "qwen3.5:9b"
 	gemmaModel   = "gemma4:12b"
 	defKeepAlive = "5m"
-	systemPrompt = "You are a purchasing/sales assistant for a welding distrubutor. Your users will only be outside salespeople and purchasing managers. Frame all of your responses for that demographic. It is important that responses are not given with emojis and are styled professionally."
+
+	systemPrompt = "You are a purchasing/sales assistant for a welding distributor. Your users will only be outside salespeople and purchasing managers. Frame all of your responses for that demographic. It is important that responses are not given with emojis and are styled professionally."
 )
 
 type Messages struct {
-	Role     string
-	ToolName string `json:"tool_name,omitempty"`
-	Content  string
+	Role      string     `json:"role"`
+	Content   string     `json:"content,omitempty"`
+	ToolName  string     `json:"tool_name,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type Chat struct {
-	Messages  []Messages
-	Model     string
-	Stream    bool
-	KeepAlive string
+	Messages  []Messages  `json:"messages"`
+	Model     string      `json:"model"`
+	Stream    bool        `json:"stream"`
+	KeepAlive string      `json:"keep_alive"`
 	Tools     []ModelTool `json:"tools,omitempty"`
-	registry  *Registry
+
+	registry *Registry
 }
 
 type ToolCall struct {
@@ -43,97 +46,164 @@ type ToolCall struct {
 }
 
 type AIMessage struct {
-	Content   string
+	Role      string     `json:"role,omitempty"`
+	Content   string     `json:"content,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
+
 type Answer struct {
-	Model   string
-	Message AIMessage
-	Done    bool
+	Model   string    `json:"model"`
+	Message AIMessage `json:"message"`
+	Done    bool      `json:"done"`
+}
+
+func createMessage(m *Chat) ([]byte, error) {
+	return json.Marshal(m)
 }
 
 func (m *Chat) SendMessage() (*Answer, error) {
+	const maxToolRounds = 5
+
+	for round := 0; round < maxToolRounds; round++ {
+		ansr, err := m.sendOnce()
+		if err != nil {
+			return nil, err
+		}
+
+		fmt.Printf(
+			"Response: done:%t, model:%s, ToolCalls: %v\n\n",
+			ansr.Done,
+			ansr.Model,
+			ansr.Message.ToolCalls,
+		)
+
+		// This is critical.
+		// Save the assistant response WITH tool_calls.
+		m.AppendAssistantMessage(ansr.Message)
+
+		// No tool calls means this is the final answer for the user.
+		if len(ansr.Message.ToolCalls) == 0 {
+			fmt.Println("Finalizing Response to user")
+			return ansr, nil
+		}
+
+		// Run tools, append tool results, then loop back and ask the model again.
+		toolResults := m.RunToolCalls(ansr.Message)
+
+		for _, tr := range toolResults {
+			if tr.Error != nil {
+				fmt.Println("error on tool results:", tr.Error)
+
+				errResponse := fmt.Sprintf(`{"error":%q}`, tr.Error.Error())
+				m.AppendMessage("tool", tr.Name, errResponse)
+				continue
+			}
+
+			fmt.Println("Tool Result for tool:", tr.Name, tr.Response)
+			m.AppendMessage("tool", tr.Name, tr.Response)
+		}
+	}
+
+	return nil, fmt.Errorf("too many tool call rounds")
+}
+
+func (m *Chat) sendOnce() (*Answer, error) {
 	b, err := createMessage(m)
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("MESSAGES SENT TO MODEL:")
+	fmt.Println(string(b))
+
 	br := bytes.NewReader(b)
+
 	resp, err := http.Post(apiUrl+"chat", "application/json", br)
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("error on sending message. StatusCode: %d\n response: %s", resp.StatusCode, body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf(
+			"error on sending message. StatusCode: %d\nresponse: %s",
+			resp.StatusCode,
+			body,
+		)
 	}
 
-	ansr := &Answer{}
 	fmt.Println(string(body))
 	fmt.Println("")
-	err = json.Unmarshal(body, ansr)
-	if err != nil {
-		return nil, fmt.Errorf("error : %s", err)
-	}
-	fmt.Printf("Response: done:%t, model:%s, ToolCalls: %v \n\n", ansr.Done, ansr.Model, ansr.Message.ToolCalls)
-	m.AppendMessage("assistant", "", ansr.Message.Content)
 
-	if len(ansr.Message.ToolCalls) > 0 {
-		ansr := m.RunToolCalls(ansr.Message)
-		return ansr, err
+	ansr := &Answer{}
+
+	if err := json.Unmarshal(body, ansr); err != nil {
+		return nil, fmt.Errorf("unmarshal chat response: %w", err)
 	}
-	fmt.Println("Finalizing Response to user")
-	return ansr, err
+
+	return ansr, nil
 }
 
-func (m *Chat) RunToolCalls(ai AIMessage) *Answer {
+func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 	ch := make(chan ToolResult, len(ai.ToolCalls))
 	ctx := context.TODO()
 
 	for _, v := range ai.ToolCalls {
-		_, ok := m.registry.tools[v.Function.Name]
+		tool, ok := m.registry.tools[v.Function.Name]
 		if !ok {
-			ch <- ToolResult{Name: v.Function.Name, Error: errors.New("Tool not found")}
+			ch <- ToolResult{
+				Name:  v.Function.Name,
+				Error: errors.New("tool not found"),
+			}
 			continue
 		}
+
 		go func(t ToolCall) {
-			results := m.registry.tools[t.Function.Name].Execute(ctx, t)
-			ch <- results
+			result := tool.Execute(ctx, t)
+
+			// Make sure the result has the tool name.
+			if result.Name == "" {
+				result.Name = t.Function.Name
+			}
+
+			ch <- result
 		}(v)
 	}
-	var tr []ToolResult
+
+	results := make([]ToolResult, 0, len(ai.ToolCalls))
+
 	for range ai.ToolCalls {
-		trindex := <-ch
-		tr = append(tr, trindex)
-		if trindex.Error != nil {
-			fmt.Println("error on tool results: ", trindex.Error)
-			continue
-		}
-		fmt.Println("Tool Result for tool: ", trindex.Name)
-		m.AppendMessage("tool", trindex.Name, trindex.Response)
-	}
-	ansr, err := m.SendMessage()
-	if err != nil {
-		fmt.Println("error: ", err)
+		result := <-ch
+		results = append(results, result)
 	}
 
-	return ansr
+	return results
 }
 
 func (m *Chat) AppendMessage(role string, toolname string, text string) {
-	msg := Messages{Role: role, Content: text}
+	msg := Messages{
+		Role:    role,
+		Content: text,
+	}
+
 	if toolname != "" {
 		msg.ToolName = toolname
 	}
+
 	m.Messages = append(m.Messages, msg)
 }
 
-func createMessage(m *Chat) ([]byte, error) {
-	b, err := json.Marshal(m)
-	return b, err
+func (m *Chat) AppendAssistantMessage(ai AIMessage) {
+	m.Messages = append(m.Messages, Messages{
+		Role:      "assistant",
+		Content:   ai.Content,
+		ToolCalls: ai.ToolCalls,
+	})
 }
 
 func (m *Chat) SetSystemMessage() {

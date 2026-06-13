@@ -1,6 +1,7 @@
 package main
 
 import (
+	"AIMS2/importer"
 	"bytes"
 	"context"
 	"database/sql"
@@ -10,9 +11,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"AIMS2/importer"
-	_ "AIMS2/importer"
 )
 
 const apiEndpoint = "https://ollama.com/api/web_search"
@@ -21,6 +19,7 @@ func InitializeTools() *Registry {
 	r := &Registry{}
 	r.tools = make(map[string]Tool)
 	r.Register(&WebSearchTool{})
+	r.Register(&StockCheck{})
 	return r
 }
 
@@ -213,35 +212,47 @@ func (t *StockCheck) Parameters() Parameters {
 	}
 }
 
-func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) string {
-	var build strings.Builder
-	for _, v := range results {
-		result := fmt.Sprintf("%+v, ", v)
-		_, err := build.WriteString(result)
-		if err != nil {
-			fmt.Printf("error on building results inventory data string: %v", err)
-		}
+func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (string, error) {
+	b, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal inventory results: %w", err)
 	}
-	return build.String()
+
+	return string(b), nil
 }
 
 func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	qry := tc.Function.Arguments["part_number"]
-	tr := ToolResult{Name: tc.Function.Name}
-	qs, ok := qry.(string)
 
-	if !ok {
-		tr.Error = errors.New("error: could not find args in stock search")
+	tr := ToolResult{Name: tc.Function.Name}
+
+	qs, ok := qry.(string)
+	if !ok || strings.TrimSpace(qs) == "" {
+		tr.Error = errors.New("missing required argument: part_number")
 		return tr
 	}
-	rs := func() (string, error) {
-		si, err := importer.SearchInventory(importer.InventoryLookUpArgs{Query: qs, Location: "1", Limit: 10})
-		if err != nil {
-			fmt.Println(err)
-		}
-		result := t.ParseInventoryData(si)
-		return result, err
+
+	results, err := importer.SearchInventory(importer.InventoryLookUpArgs{
+		Query:    qs,
+		Location: "1",
+		Limit:    10,
+	})
+	if err != nil {
+		tr.Error = err
+		return tr
 	}
-	tr.Response, tr.Error = rs()
+
+	if len(results) == 0 {
+		tr.Response = `{"results":[],"message":"no results found"}`
+		return tr
+	}
+
+	response, err := t.ParseInventoryData(results)
+	if err != nil {
+		tr.Error = err
+		return tr
+	}
+
+	tr.Response = response
 	return tr
 }

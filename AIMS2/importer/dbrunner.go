@@ -32,8 +32,9 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./inventory.db")
+	db, err := sql.Open("sqlite", "./importer/inventory.db")
 	if err != nil {
+		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")
 		return nil, err
 	}
@@ -122,9 +123,9 @@ type InventoryLookUpArgs struct {
 	Limit    int    `json:"limit,omitempty"`
 }
 type ReturnResult struct {
-	Item            InventoryItem
-	ConfidenceScore int    `json:"confidence_score"`
-	MatchType       string `json:"match_type"`
+	Item            InventoryItem `json:"item"`
+	ConfidenceScore int           `json:"confidence_score"`
+	MatchType       string        `json:"match_type"`
 }
 
 const (
@@ -188,10 +189,12 @@ func (il *InvenentoryLookup) checkStockNumber() ([]*ReturnResult, error) {
 }
 
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
+	fmt.Printf("Checking for: %+v\n", args)
 	db, err := OpenDB()
 	if err != nil {
 		return nil, err
 	}
+
 	il := &InvenentoryLookup{
 		db:   db,
 		Args: args,
@@ -201,5 +204,6 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		return nil, err
 	}
 	il.Results = append(il.Results, result...)
+	fmt.Printf("Returning results on inventory: %+v\n", &il.Results)
 	return il.Results, err
 }
