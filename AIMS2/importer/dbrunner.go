@@ -221,14 +221,14 @@ func Tokenize(s string) []string {
 			b.Reset()
 		}
 	}
-	for _, v := range tokens {
-		v = "%" + v + "%"
+	for i, v := range tokens {
+		tokens[i] = "%" + v + "%"
 	}
 	return tokens
 }
 
-func (il *InvenentoryLookup) partialQuery(s string, stmt *sql.Stmt, limit int, confidence int, reason string) {
-	rows, err := stmt.Query(s, limit)
+func (il *InvenentoryLookup) partialQuery(s string, stmt *sql.Stmt, location string, limit int, confidence int, reason string) {
+	rows, err := stmt.Query(s, location, limit)
 	if err != nil {
 		return
 	}
@@ -262,12 +262,15 @@ func (il *InvenentoryLookup) partialQuery(s string, stmt *sql.Stmt, limit int, c
 	}
 }
 
-func (il *InvenentoryLookup) checkPartialStockNumber() ([]*ReturnResult, error) {
+func (il *InvenentoryLookup) checkPartialStockNumber() {
 	db := il.db
 	if err := db.Ping(); err != nil {
-		return nil, err
+		return
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number LIKE ? LIMIT ?")
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number LIKE ? AND location=? LIMIT ?")
+	if err != nil {
+		return
+	}
 	defer func() {
 		if err := stmt.Close(); err != nil {
 			fmt.Println(err)
@@ -275,19 +278,35 @@ func (il *InvenentoryLookup) checkPartialStockNumber() ([]*ReturnResult, error) 
 	}()
 	qry := il.Args.Query
 	tokens := Tokenize(qry)
-	var rr []*ReturnResult
 
 	for _, v := range tokens {
 		switch {
 		case len(v) > 2:
-			il.partialQuery(v, stmt, 10, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
+			il.partialQuery(v, stmt, il.Args.Location, 10, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
 			break
 		case len(v) <= 2:
-
+			il.partialQuery(v, stmt, il.Args.Location, 5, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
 		}
 	}
+}
 
-	return nil, nil
+func (il *InvenentoryLookup) searchDescription() {
+	db := il.db
+	err := db.Ping()
+	if err != nil {
+		fmt.Print(err)
+		return
+	}
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE description LIKE ? AND location=? LIMIT ?")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	il.partialQuery(il.Args.Query, stmt, il.Args.Location, 10, ConfidenceDescriptionAnyWord, "Query exactly matched all words.")
+	tokens := Tokenize(il.Args.Query)
+	for _, v := range tokens {
+		il.partialQuery(v, stmt, il.Args.Location, 5, ConfidenceDescriptionAnyWord, "Query found a partial match in description")
+	}
 }
 
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
@@ -302,6 +321,8 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		Args: args,
 	}
 	result, err := il.checkExactStockNumber()
+	il.checkPartialStockNumber()
+	il.searchDescription()
 	if err != nil {
 		return nil, err
 	}

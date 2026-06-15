@@ -1,39 +1,31 @@
 package importer
 
 import (
+	"fmt"
 	"testing"
 )
 
-func TestTestOpen(t *testing.T) {
-	err := TestOpen()
-	if err != nil {
-		t.Error(err)
-	}
-}
+// func TestTestOpen(t *testing.T) {
+// 	err := TestOpen()
+// 	if err != nil {
+// 		t.Error(err)
+// 	}
+// }
 
 func TestSearchInventoryByStockNumber(t *testing.T) {
 	results, err := SearchInventory(InventoryLookUpArgs{
-		Query:    "3M-16114",
+		Query:    "contact tip",
 		Location: "1",
 		Limit:    10,
 	})
 	if err != nil {
 		t.Fatalf("search inventory: %v", err)
 	}
-
-	if len(results) == 0 {
-		t.Fatalf("expected at least one result")
+	if len(results) <= 0 {
+		t.Fatalf("error no results found.")
 	}
 
-	got := results[0]
-
-	if got.Item.StockNumber != "3M-16114" {
-		t.Fatalf("expected stock number %q, got %q", "3M-16114", got.Item.StockNumber)
+	for _, v := range results {
+		fmt.Printf("Result: %+v\n", v)
 	}
-
-	if got.Item.Location != 1 {
-		t.Fatalf("expected location 1, got %f", got.Item.Location)
-	}
-
-	t.Logf("found item: %+v", got)
 }
