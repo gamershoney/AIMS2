@@ -15,9 +15,9 @@ var TableName string = "inventory"
 
 type InventoryItem struct {
 	ID               int
-	Location         float64
-	StockNumber      string
-	Description      string
+	Location         float64 `json:"store_id"`
+	StockNumber      string  `json:"stock_number"`
+	Description      string  `json:"description"`
 	VendorNumber     string
 	VendorProdNumber string
 	Unit             string
@@ -34,7 +34,7 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./inventory.db")
+	db, err := sql.Open("sqlite", "./importer/inventory.db")
 	if err != nil {
 		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")
@@ -204,26 +204,36 @@ func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 
 func Tokenize(s string) []string {
 	up := strings.ToUpper(strings.TrimSpace(s))
+
 	var tokens []string
 	var b strings.Builder
 
-	for i, v := range up {
-		if unicode.IsDigit(v) || unicode.IsLetter(v) {
-			if b.Len() > 5 || i == (b.Len()-1) {
-				b.WriteRune(v)
-				tokens = append(tokens, b.String())
-				b.Reset()
-			} else {
-				b.WriteRune(v)
-			}
-		} else {
-			tokens = append(tokens, b.String())
-			b.Reset()
+	flush := func() {
+		if b.Len() == 0 {
+			return
 		}
+
+		token := b.String()
+
+		// Skip very short noisy tokens like "KP", "M", "1"
+		if len(token) >= 3 {
+			tokens = append(tokens, "%"+token+"%")
+		}
+
+		b.Reset()
 	}
-	for i, v := range tokens {
-		tokens[i] = "%" + v + "%"
+
+	for _, r := range up {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) {
+			b.WriteRune(r)
+			continue
+		}
+
+		flush()
 	}
+
+	flush()
+
 	return tokens
 }
 
@@ -267,7 +277,7 @@ func (il *InvenentoryLookup) checkPartialStockNumber() {
 	if err := db.Ping(); err != nil {
 		return
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number LIKE ? AND location=? LIMIT ?")
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE (stock_number LIKE ? OR vendor_product_number LIKE ?) AND location=? LIMIT ?")
 	if err != nil {
 		return
 	}
@@ -282,51 +292,95 @@ func (il *InvenentoryLookup) checkPartialStockNumber() {
 	for _, v := range tokens {
 		switch {
 		case len(v) > 2:
-			il.partialQuery(v, stmt, il.Args.Location, 10, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
+			il.partialQuery(v, stmt, il.Args.Location, il.Args.Limit, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
 			break
 		case len(v) <= 2:
-			il.partialQuery(v, stmt, il.Args.Location, 5, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
+			il.partialQuery(v, stmt, il.Args.Location, il.Args.Limit, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
 		}
 	}
 }
 
-func (il *InvenentoryLookup) searchDescription() {
+func (il *InvenentoryLookup) searchDescription() error {
 	db := il.db
-	err := db.Ping()
+
+	stmt, err := db.Prepare(`
+SELECT
+	location,
+	stock_number,
+	vendor_number,
+	vendor_product_number,
+	description,
+	on_hand,
+	price,
+	cost,
+	avg_usage,
+	last_sale,
+	last_receipt,
+	last_order
+FROM inventory
+WHERE description LIKE ?
+AND location = ?
+LIMIT ?`)
 	if err != nil {
-		fmt.Print(err)
-		return
+		return err
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE description LIKE ? AND location=? LIMIT ?")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	il.partialQuery(il.Args.Query, stmt, il.Args.Location, 10, ConfidenceDescriptionAnyWord, "Query exactly matched all words.")
+	defer stmt.Close()
+
+	phrase := "%" + strings.ToUpper(strings.TrimSpace(il.Args.Query)) + "%"
+
+	il.partialQuery(
+		phrase,
+		stmt,
+		il.Args.Location,
+		10,
+		ConfidenceDescriptionAllWords,
+		"Description matched full query phrase.",
+	)
+
 	tokens := Tokenize(il.Args.Query)
-	for _, v := range tokens {
-		il.partialQuery(v, stmt, il.Args.Location, 5, ConfidenceDescriptionAnyWord, "Query found a partial match in description")
+
+	for _, token := range tokens {
+		il.partialQuery(
+			token,
+			stmt,
+			il.Args.Location,
+			5,
+			ConfidenceDescriptionAnyWord,
+			"Description matched a query token.",
+		)
 	}
+
+	return nil
 }
 
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 	fmt.Printf("Checking for: %+v\n", args)
+
+	if args.Limit <= 0 {
+		args.Limit = 10
+	}
+
+	if args.Location == "" {
+		args.Location = "1"
+	}
+
 	db, err := OpenDB()
 	if err != nil {
 		return nil, err
 	}
-
+	defer db.Close()
 	il := &InvenentoryLookup{
 		db:   db,
 		Args: args,
 	}
 	result, err := il.checkExactStockNumber()
+	il.Results = append(il.Results, result...)
 	il.checkPartialStockNumber()
 	il.searchDescription()
 	if err != nil {
 		return nil, err
 	}
-	il.Results = append(il.Results, result...)
+
 	fmt.Printf("Returning results on inventory: %+v\n", &il.Results)
 	return il.Results, err
 }
