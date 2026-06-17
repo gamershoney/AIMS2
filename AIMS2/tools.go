@@ -206,9 +206,9 @@ func (t *StockCheck) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"part_number": {Type: "string", Description: "Enter the exact part number you would like to search our inventory for."},
+			"query": {Type: "string", Description: "Enter the exact part number you would like to search our inventory for."},
 		},
-		Required: []string{"Part number"},
+		Required: []string{"query"},
 	}
 }
 
@@ -222,7 +222,7 @@ func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (strin
 }
 
 func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
-	qry := tc.Function.Arguments["part_number"]
+	qry := tc.Function.Arguments["query"]
 
 	tr := ToolResult{Name: tc.Function.Name}
 
