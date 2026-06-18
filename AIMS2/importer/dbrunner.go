@@ -121,6 +121,7 @@ func AddInventory(db *sql.DB, i []*InventoryItem) error {
 
 type InventoryLookUpArgs struct {
 	Query    string `json:"query"`
+	InStock  bool   `json:"in_stock"`
 	Location string `json:"location,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
 }
@@ -150,11 +151,9 @@ func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 	if err := db.Ping(); err != nil {
 		return nil, err
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number=? AND location=? LIMIT ?")
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE stock_number=? AND location=? AND on_hand>? LIMIT ?")
 	if err != nil {
 		fmt.Println(err)
-	}
-	if err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -163,7 +162,14 @@ func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 			fmt.Println(err)
 		}
 	}()
-	rows, err := stmt.Query(il.Args.Query, il.Args.Location, il.Args.Limit)
+	var stock int
+	if il.Args.InStock {
+		stock = -1
+	} else {
+		stock = 0
+	}
+
+	rows, err := stmt.Query(il.Args.Query, il.Args.Location, stock, il.Args.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -240,14 +246,50 @@ func Tokenize(s string) []string {
 	return tokens
 }
 
-func (il *InvenentoryLookup) partialQuery(s string, stmt *sql.Stmt, location string, limit int, confidence int, reason string) error {
-	rows, err := stmt.Query(s, s, location, limit)
+func (il *InvenentoryLookup) descriptionQuery(s string, instock int, stmt *sql.Stmt, location string, limit int, confidence int, reason string) error {
+	rows, err := stmt.Query(s, location, instock, limit)
 	if err != nil {
 		return err
 	}
+	fmt.Println("Reading row descriptions...")
 
 	for rows.Next() {
-		fmt.Println("Reading row...")
+		item := &InventoryItem{}
+		err := rows.Scan(&item.Location,
+			&item.StockNumber,
+			&item.VendorNumber,
+			&item.VendorProdNumber,
+			&item.Description,
+			&item.OnHand,
+			&item.Price,
+			&item.Cost,
+			&item.Usage,
+			&item.LastSale,
+			&item.LastReceipt,
+			&item.LastOrder)
+		if err != nil {
+			fmt.Println("Error on scanning rows")
+			return err
+		}
+		rr := &ReturnResult{
+			Item:            *item,
+			ConfidenceScore: confidence,
+			MatchType:       reason,
+		}
+		il.Results = append(il.Results, rr)
+
+	}
+	return err
+}
+
+func (il *InvenentoryLookup) partialQuery(s string, instock int, stmt *sql.Stmt, location string, limit int, confidence int, reason string) error {
+	rows, err := stmt.Query(s, s, location, instock, limit)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Reading row...")
+
+	for rows.Next() {
 		item := &InventoryItem{}
 		err := rows.Scan(&item.Location,
 			&item.StockNumber,
@@ -281,7 +323,7 @@ func (il *InvenentoryLookup) checkPartialStockNumber() error {
 	if err := db.Ping(); err != nil {
 		return err
 	}
-	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE (stock_number LIKE ? OR vendor_product_number LIKE ?) AND location=? LIMIT ?")
+	stmt, err := db.Prepare("SELECT location,stock_number,vendor_number,vendor_product_number,description,on_hand,price,cost,avg_usage,last_sale,last_receipt,last_order FROM inventory WHERE (stock_number LIKE ? OR vendor_product_number LIKE ?) AND location=? AND on_hand>? LIMIT ?")
 	if err != nil {
 		return err
 	}
@@ -290,6 +332,12 @@ func (il *InvenentoryLookup) checkPartialStockNumber() error {
 			fmt.Println(err)
 		}
 	}()
+	var stock int
+	if il.Args.InStock {
+		stock = 0
+	} else {
+		stock = -1
+	}
 	qry := il.Args.Query
 	tokens := Tokenize(qry)
 
@@ -297,11 +345,11 @@ func (il *InvenentoryLookup) checkPartialStockNumber() error {
 		var err error
 		switch {
 		case len(v) > 2:
-			err = il.partialQuery(v, stmt, il.Args.Location, il.Args.Limit, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
+			err = il.partialQuery(v, stock, stmt, il.Args.Location, il.Args.Limit, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
 
 		case len(v) <= 2:
 
-			err = il.partialQuery(v, stmt, il.Args.Location, il.Args.Limit, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
+			err = il.partialQuery(v, stock, stmt, il.Args.Location, il.Args.Limit, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
 		}
 		if err != nil {
 			return err
@@ -312,7 +360,7 @@ func (il *InvenentoryLookup) checkPartialStockNumber() error {
 
 func (il *InvenentoryLookup) searchDescription() error {
 	db := il.db
-
+	var err error
 	stmt, err := db.Prepare(`
 SELECT
 	location,
@@ -330,16 +378,23 @@ SELECT
 FROM inventory
 WHERE description LIKE ?
 AND location = ?
+AND on_hand>?
 LIMIT ?`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-
+	var stock int
+	if il.Args.InStock {
+		stock = 0
+	} else {
+		stock = -1
+	}
 	phrase := "%" + strings.ToUpper(strings.TrimSpace(il.Args.Query)) + "%"
 
-	il.partialQuery(
+	err = il.descriptionQuery(
 		phrase,
+		stock,
 		stmt,
 		il.Args.Location,
 		10,
@@ -352,6 +407,7 @@ LIMIT ?`)
 	for _, token := range tokens {
 		err := il.partialQuery(
 			token,
+			stock,
 			stmt,
 			il.Args.Location,
 			5,
@@ -363,7 +419,7 @@ LIMIT ?`)
 		}
 	}
 
-	return nil
+	return err
 }
 
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {

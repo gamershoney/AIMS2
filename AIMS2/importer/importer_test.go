@@ -14,7 +14,8 @@ import (
 
 func TestSearchInventoryByStockNumber(t *testing.T) {
 	results, err := SearchInventory(InventoryLookUpArgs{
-		Query:    "contact tip",
+		InStock:  true,
+		Query:    "1598",
 		Location: "1",
 		Limit:    10,
 	})

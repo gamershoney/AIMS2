@@ -206,7 +206,8 @@ func (t *StockCheck) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"query": {Type: "string", Description: "Enter the exact part number you would like to search our inventory for."},
+			"query":    {Type: "string", Description: "Enter the exact part number or keyphrase you would like to search our inventory for."},
+			"in_stock": {Type: "boolean", Description: "enter true if the item must be in stock, enter false if the item does not need to be in stock."},
 		},
 		Required: []string{"query"},
 	}
@@ -223,7 +224,10 @@ func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (strin
 
 func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	qry := tc.Function.Arguments["query"]
-
+	instock, ok := tc.Function.Arguments["in_stock"]
+	if !ok {
+		instock = false
+	}
 	tr := ToolResult{Name: tc.Function.Name}
 
 	qs, ok := qry.(string)
@@ -231,9 +235,13 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 		tr.Error = errors.New("missing required argument: part_number")
 		return tr
 	}
-
+	instock, valid := instock.(bool)
+	if !valid {
+		tr.Error = errors.New("invalid usage on instock boolean")
+	}
 	results, err := importer.SearchInventory(importer.InventoryLookUpArgs{
 		Query:    qs,
+		InStock:  instock.(bool),
 		Location: "1",
 		Limit:    10,
 	})
