@@ -20,3 +20,23 @@ ON inventory(stock_number);
 
 CREATE INDEX IF NOT EXISTS idx_inventory_description
 ON inventory(description);
+
+CREATE TABLE IF NOT EXISTS inventory_notes(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+  stock_number TEXT NOT NULL,
+  location REAL NOT NULL DEFAULT '1',
+
+  note TEXT NOT NULL DEFAULT '',
+  is_critical BOOLEAN NOT NULL DEFAULT FALSE,
+
+  minimum_on_hand REAL DEFAULT 0,
+  target_on_hand REAL DEFAULT 0,
+
+  priority INTEGER NOT NULL DEFAULT 0,
+
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+  UNIQUE(stock_number)
+);

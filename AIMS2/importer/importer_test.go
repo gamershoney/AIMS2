@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-// func TestTestOpen(t *testing.T) {
-// 	err := TestOpen()
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-// }
+func TestTestOpen(t *testing.T) {
+	err := TestOpen()
+	if err != nil {
+		t.Error(err)
+	}
+}
 
 func TestSearchInventoryByStockNumber(t *testing.T) {
 	results, err := SearchInventory(InventoryLookUpArgs{
