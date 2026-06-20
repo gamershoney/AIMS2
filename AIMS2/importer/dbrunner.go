@@ -34,7 +34,7 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./importer/inventory.db")
+	db, err := sql.Open("sqlite", "./inventory.db")
 	if err != nil {
 		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")

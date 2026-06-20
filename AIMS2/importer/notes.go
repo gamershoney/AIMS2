@@ -22,11 +22,7 @@ func NewNote(sku string, location int, db *sql.DB) *Note {
 	return note
 }
 
-func GetNote(sku string, location int) ([]*Note, error) {
-	db, err := OpenDB()
-	if err != nil {
-		return nil, err
-	}
+func GetNote(sku string, location int, db *sql.DB) ([]*Note, error) {
 	stmt, err := db.Prepare(
 		`SELECT stock_number,
 		location,
@@ -53,7 +49,7 @@ func GetNote(sku string, location int) ([]*Note, error) {
 	var na []*Note
 	for rows.Next() {
 		note := &Note{}
-		err := rows.Scan(note.StockNumber, note.Location, note.Note, note.MinimumOnHand, note.TargetOnHand)
+		err := rows.Scan(&note.StockNumber, &note.Location, &note.Note, &note.IsCritical, &note.MinimumOnHand, &note.TargetOnHand)
 		if err != nil {
 			return nil, err
 		}
@@ -81,7 +77,7 @@ func (note *Note) WriteNote() error {
 	if err != nil {
 		return err
 	}
-	_, err = stmt.Exec(note.StockNumber, note.Location, note.Note, note.IsCritical, note.MinimumOnHand, note.TargetOnHand)
+	_, err = stmt.Exec(&note.StockNumber, &note.Location, &note.Note, &note.IsCritical, &note.MinimumOnHand, &note.TargetOnHand)
 	if err != nil {
 		return err
 	}
