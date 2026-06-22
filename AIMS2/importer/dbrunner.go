@@ -34,7 +34,7 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./inventory.db")
+	db, err := sql.Open("sqlite", "./importer/inventory.db")
 	if err != nil {
 		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")
@@ -127,7 +127,7 @@ type InventoryLookUpArgs struct {
 }
 type ReturnResult struct {
 	Item            InventoryItem `json:"item"`
-	Note            *Note         `json:"note"`
+	Note            *Note         `json:"note,omitempty"`
 	ConfidenceScore int           `json:"confidence_score"`
 	MatchType       string        `json:"match_type"`
 }
@@ -165,9 +165,9 @@ func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 	}()
 	var stock int
 	if il.Args.InStock {
-		stock = -1
-	} else {
 		stock = 0
+	} else {
+		stock = -1
 	}
 
 	rows, err := stmt.Query(il.Args.Query, il.Args.Location, stock, il.Args.Limit)
@@ -252,6 +252,7 @@ func (il *InvenentoryLookup) descriptionQuery(s string, instock int, stmt *sql.S
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	fmt.Println("Reading row descriptions...")
 
 	for rows.Next() {
@@ -288,6 +289,7 @@ func (il *InvenentoryLookup) partialQuery(s string, instock int, stmt *sql.Stmt,
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	fmt.Println("Reading row...")
 
 	for rows.Next() {
@@ -406,7 +408,7 @@ LIMIT ?`)
 	tokens := Tokenize(il.Args.Query)
 
 	for _, token := range tokens {
-		err := il.partialQuery(
+		err := il.descriptionQuery(
 			token,
 			stock,
 			stmt,
@@ -464,17 +466,18 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		fmt.Println()
 	}
 	il.Results = append(il.Results, result...)
-	err = il.checkPartialStockNumber()
-	if err != nil {
-		fmt.Println("error on partial stock number", err)
-		return nil, err
+	if len(result) == 0 {
+		err = il.checkPartialStockNumber()
+		if err != nil {
+			fmt.Println("error on partial stock number", err)
+			return nil, err
+		}
+		err = il.searchDescription()
+		if err != nil {
+			fmt.Println("error on description search", err)
+			return nil, err
+		}
 	}
-	err = il.searchDescription()
-	if err != nil {
-		fmt.Println("error on description search", err)
-		return nil, err
-	}
-
 	for _, v := range il.Results {
 		note, err := AttachNotes(v.Item.StockNumber, int(v.Item.Location), il.db)
 		if err != nil {
