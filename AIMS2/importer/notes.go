@@ -3,13 +3,13 @@ package importer
 import "database/sql"
 
 type Note struct {
-	ID            int     `json:"id"`
+	ID            int     `json:"id,omitempty"`
 	StockNumber   string  `json:"stock_number"`
-	Location      int     `json:"location"`
-	Note          string  `json:"note"`
-	IsCritical    bool    `json:"is_critical"`
-	MinimumOnHand float32 `json:"minimum_on_hand"`
-	TargetOnHand  float32 `json:"target_on_hand"`
+	Location      int     `json:"location,omitempty"`
+	Note          string  `json:"note,omitempty"`
+	IsCritical    bool    `json:"is_critical,omitempty"`
+	MinimumOnHand float32 `json:"minimum_on_hand,omitempty"`
+	TargetOnHand  float32 `json:"target_on_hand,omitempty"`
 	db            *sql.DB
 }
 
@@ -73,7 +73,14 @@ func (note *Note) WriteNote() error {
 		minimum_on_hand,
 		target_on_hand
 		) 
-		VALUES(?,?,?,?,?,?)`)
+		VALUES(?,?,?,?,?,?)
+		ON CONFLICT (stock_number)
+		DO UPDATE SET 
+		note=excluded.note,
+		is_critical=excluded.is_critical,
+		minimum_on_hand=excluded.minimum_on_hand,
+		target_on_hand=excluded.target_on_hand
+		`)
 	if err != nil {
 		return err
 	}

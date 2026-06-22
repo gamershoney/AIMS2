@@ -127,6 +127,7 @@ type InventoryLookUpArgs struct {
 }
 type ReturnResult struct {
 	Item            InventoryItem `json:"item"`
+	Note            *Note         `json:"note"`
 	ConfidenceScore int           `json:"confidence_score"`
 	MatchType       string        `json:"match_type"`
 }
@@ -422,6 +423,17 @@ LIMIT ?`)
 	return err
 }
 
+func AttachNotes(sku string, location int, db *sql.DB) (*Note, error) {
+	notes, err := GetNote(sku, location, db)
+	if err != nil {
+		return nil, err
+	}
+	if len(notes) > 0 {
+		return notes[0], err
+	}
+	return nil, err
+}
+
 func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 	fmt.Printf("Checking for: %+v\n", args)
 
@@ -463,6 +475,16 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		return nil, err
 	}
 
+	for _, v := range il.Results {
+		note, err := AttachNotes(v.Item.StockNumber, int(v.Item.Location), il.db)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		if note != nil {
+			v.Note = note
+		}
+	}
 	fmt.Printf("Returning results on inventory: %+v\n", &il.Results)
 	return il.Results, err
 }

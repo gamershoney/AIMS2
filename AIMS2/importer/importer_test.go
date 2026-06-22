@@ -40,18 +40,23 @@ func TestNotes(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	note := NewNote("testitem", 1, db)
+	note := NewNote("BRN-1598", 1, db)
 
 	note.Note = "This is a test note"
 	err = note.WriteNote()
 	if err != nil {
 		t.Error(err)
 	}
-	notes, err := GetNote("testitem", 1, db)
+	note.Note = "We rewrote this note lol"
+	err = note.WriteNote()
+	if err != nil {
+		t.Error(err)
+	}
+	notes, err := GetNote("BRN-1598", 1, db)
 	if err != nil {
 		t.Error(err)
 	}
 	for _, v := range notes {
-		fmt.Printf("read note: %v\t %v\n", v.StockNumber, v.Note)
+		fmt.Printf("read note: %+v\t %+v\n", v.StockNumber, v.Note)
 	}
 }
