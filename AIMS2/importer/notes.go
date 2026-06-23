@@ -1,6 +1,11 @@
 package importer
 
-import "database/sql"
+import (
+	"cmp"
+	"database/sql"
+	"fmt"
+	"slices"
+)
 
 type Note struct {
 	ID            int     `json:"id,omitempty"`
@@ -88,5 +93,87 @@ func (note *Note) WriteNote() error {
 	if err != nil {
 		return err
 	}
+	return err
+}
+
+type OrderItem struct {
+	Location     float64 `json:"store_id"`
+	StockNumber  string  `json:"stock_number"`
+	VendorNumber string  `json:"vendor_number"`
+	OnHand       float64 `json:"on_hand"`
+	LastReceipt  string  `json:"last_receipt"`
+	LastOrder    string  `json:"last_order"`
+	priority     float32
+	Note         *Note `json:"note,omitempty"`
+}
+
+func GetCriticalItems() ([]*OrderItem, error) {
+	db, err := OpenDB()
+	var items []*OrderItem
+	if err != nil {
+		return nil, fmt.Errorf("error opening database: %v\n", err)
+	}
+	defer db.Close()
+	stmt, err := db.Prepare(`
+		SELECT stock_number, minimum_on_hand, is_critical, note
+		FROM inventory_notes
+		WHERE (is_critical=true)`)
+	if err != nil {
+		return nil, fmt.Errorf("error on preparing query statement for critical items: %v\n", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return nil, fmt.Errorf("error on querying cricitcal items: %v\n", err)
+	}
+	for rows.Next() {
+		item := &OrderItem{}
+		rows.Scan(&item.StockNumber,
+			&item.Note.MinimumOnHand,
+			&item.Note.IsCritical,
+			item.Note.Note)
+		result, err := SearchInventory(InventoryLookUpArgs{
+			Query:   item.StockNumber,
+			InStock: false,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("error on finding cricitcal item in inventory: %v\n", err)
+		}
+		if len(result) == 0 {
+			fmt.Println("Note results found on critical item")
+			continue
+		}
+		rslt := result[0]
+		item.Location = rslt.Item.Location
+		item.VendorNumber = rslt.Item.VendorNumber
+		item.OnHand = rslt.Item.OnHand
+		item.LastReceipt = rslt.Item.LastReceipt
+		items = append(items, item)
+	}
+	return items, err
+}
+
+func sortAndDedupe(items []*OrderItem) error {
+	for i, v := range items {
+		for ti, tv := range items {
+			if v.StockNumber == tv.StockNumber && i != ti {
+				items[ti] = nil
+				items = slices.Delete(items, ti, ti+1)
+
+			}
+		}
+
+		priority := float32(v.OnHand) / v.Note.TargetOnHand
+		v.priority = priority
+	}
+	slices.SortFunc(items, func(a, b *OrderItem) int {
+		return cmp.Compare(a.priority, b.priority)
+	})
+	return nil
+}
+
+func GetPriorityVendor() error {
+	_, err := GetCriticalItems()
 	return err
 }
