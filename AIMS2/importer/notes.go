@@ -103,7 +103,7 @@ type OrderItem struct {
 	OnHand       float64 `json:"on_hand"`
 	LastReceipt  string  `json:"last_receipt"`
 	LastOrder    string  `json:"last_order"`
-	priority     float32
+	priority     float64
 	Note         *Note `json:"note,omitempty"`
 }
 
@@ -154,26 +154,46 @@ func GetCriticalItems() ([]*OrderItem, error) {
 	return items, err
 }
 
-func sortAndDedupe(items []*OrderItem) error {
-	for i, v := range items {
-		for ti, tv := range items {
-			if v.StockNumber == tv.StockNumber && i != ti {
-				items[ti] = nil
-				items = slices.Delete(items, ti, ti+1)
+func sortAndDedupe(items []*OrderItem) ([]*OrderItem, error) {
+	seen := make(map[string]struct{}, len(items))
 
-			}
+	deduped := items[:0]
+
+	for _, item := range items {
+		if item == nil {
+			continue
 		}
 
-		priority := float32(v.OnHand) / v.Note.TargetOnHand
-		v.priority = priority
+		if _, exists := seen[item.StockNumber]; exists {
+			continue
+		}
+
+		seen[item.StockNumber] = struct{}{}
+
+		if item.Note == nil {
+			return nil, fmt.Errorf("missing note for stock number %s", item.StockNumber)
+		}
+
+		if item.Note.TargetOnHand <= 0 {
+			return nil, fmt.Errorf("invalid target on hand for stock number %s", item.StockNumber)
+		}
+
+		item.priority = item.OnHand / float64(item.Note.TargetOnHand)
+
+		deduped = append(deduped, item)
 	}
-	slices.SortFunc(items, func(a, b *OrderItem) int {
+
+	slices.SortStableFunc(deduped, func(a, b *OrderItem) int {
 		return cmp.Compare(a.priority, b.priority)
 	})
-	return nil
+
+	return deduped, nil
 }
 
 func GetPriorityVendor() error {
-	_, err := GetCriticalItems()
+	critical, err := GetCriticalItems()
+	if err != nil {
+		return err
+	}
 	return err
 }
