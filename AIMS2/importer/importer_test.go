@@ -60,3 +60,13 @@ func TestNotes(t *testing.T) {
 		fmt.Printf("read note: %+v\t %+v\n", v.StockNumber, v.Note)
 	}
 }
+
+func TestGetCriticalItems(t *testing.T) {
+	items, err := GetPriorityVendor()
+	if err != nil {
+		t.Errorf("error: %v", err)
+	}
+	for _, v := range items {
+		fmt.Printf("item %s\t %d\n", v.Vendor, v.Items)
+	}
+}

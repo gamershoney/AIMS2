@@ -21,6 +21,7 @@ func InitializeTools() *Registry {
 	r.Register(&WebSearchTool{})
 	r.Register(&StockCheck{})
 	r.Register(&NotesTool{})
+	r.Register(&PriorityVendor{})
 	return r
 }
 
@@ -340,4 +341,35 @@ func (t *NotesTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 
 	return tr
+}
+
+type PriorityVendor struct{}
+
+func (t *PriorityVendor) Name() string {
+	return "priority_vendors"
+}
+
+func (t *PriorityVendor) Description() string {
+	return "use to generate a list of vendors and how many items that vendor has below average monthly usage. this is useful when trying to figure out which vendor needs to be ordered from the soonest. this requires no parameters just a tool call."
+}
+
+func (t *PriorityVendor) Parameters() Parameters {
+	return Parameters{
+		Type: "none",
+	}
+}
+
+func (t *PriorityVendor) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	results, err := importer.GetPriorityVendor()
+	tr := &ToolResult{Name: tc.Function.Name, Response: ""}
+	if err != nil {
+		tr.Error = errors.New("could not retrieve vendor data at this time")
+	}
+	b, err := json.MarshalIndent(results, "", "")
+	if err != nil {
+		tr.Error = errors.New("could not return inventory data due to database and tool calling error")
+		return *tr
+	}
+	tr.Response = string(b)
+	return *tr
 }

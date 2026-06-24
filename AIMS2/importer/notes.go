@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"database/sql"
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -47,10 +48,12 @@ func GetNote(sku string, location int, db *sql.DB) ([]*Note, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer stmt.Close()
 	rows, err := stmt.Query(sku, location)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var na []*Note
 	for rows.Next() {
 		note := &Note{}
@@ -99,10 +102,11 @@ func (note *Note) WriteNote() error {
 type OrderItem struct {
 	Location     float64 `json:"store_id"`
 	StockNumber  string  `json:"stock_number"`
-	VendorNumber string  `json:"vendor_number"`
-	OnHand       float64 `json:"on_hand"`
-	LastReceipt  string  `json:"last_receipt"`
-	LastOrder    string  `json:"last_order"`
+	VendorNumber string  `json:"vendor_number,omitempty"`
+	OnHand       float64 `json:"on_hand,omitzero"`
+	LastReceipt  string  `json:"last_receipt,omitempty"`
+	LastOrder    string  `json:"last_order,omitempty"`
+	Usage        float64 `json:"monthly_usage,omitzero"`
 	priority     float64
 	Note         *Note `json:"note,omitempty"`
 }
@@ -115,7 +119,9 @@ func GetCriticalItems() ([]*OrderItem, error) {
 	}
 	defer db.Close()
 	stmt, err := db.Prepare(`
-		SELECT stock_number, minimum_on_hand, is_critical, note
+		SELECT stock_number, minimum_on_hand,target_on_hand,
+		is_critical,
+		note
 		FROM inventory_notes
 		WHERE (is_critical=true)`)
 	if err != nil {
@@ -128,11 +134,14 @@ func GetCriticalItems() ([]*OrderItem, error) {
 		return nil, fmt.Errorf("error on querying cricitcal items: %v\n", err)
 	}
 	for rows.Next() {
-		item := &OrderItem{}
+		item := &OrderItem{
+			Note: &Note{},
+		}
 		rows.Scan(&item.StockNumber,
 			&item.Note.MinimumOnHand,
+			&item.Note.TargetOnHand,
 			&item.Note.IsCritical,
-			item.Note.Note)
+			&item.Note.Note)
 		result, err := SearchInventory(InventoryLookUpArgs{
 			Query:   item.StockNumber,
 			InStock: false,
@@ -190,10 +199,96 @@ func sortAndDedupe(items []*OrderItem) ([]*OrderItem, error) {
 	return deduped, nil
 }
 
-func GetPriorityVendor() error {
+func GetHighTurn() ([]*OrderItem, error) {
+	var err error
+	db, err := OpenDB()
+	if err != nil {
+		return nil, err
+	}
+	stmt, err := db.Prepare(`
+		SELECT 
+		i.location,
+		i.stock_number,
+		i.vendor_number,
+		i.on_hand,
+		i.last_receipt,
+		i.last_order,
+		i.avg_usage,
+		COALESCE (n.note , '') AS note
+		FROM inventory i 
+		LEFT JOIN inventory_notes n
+		USING (stock_number, location)
+		WHERE i.location=1 
+		AND
+		i.on_hand<i.avg_usage*0.8
+		AND i.avg_usage>0
+		;
+		
+		`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query()
+	if err != nil {
+		return nil, err
+	}
+	var items []*OrderItem
+	for rows.Next() {
+		item := &OrderItem{Note: &Note{}}
+		err = rows.Scan(&item.Location,
+			&item.StockNumber,
+			&item.VendorNumber,
+			&item.OnHand,
+			&item.LastReceipt,
+			&item.LastOrder,
+			&item.Usage,
+			&item.Note.Note)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, err
+}
+
+type VendorCount struct {
+	Vendor string `json:"vendor_number"`
+	Items  int    `json:"low_items"`
+}
+
+func GetPriorityVendor() ([]*VendorCount, error) {
 	critical, err := GetCriticalItems()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return err
+	high, err := GetHighTurn()
+	if err != nil {
+		return nil, err
+	}
+	critical = append(critical, high...)
+
+	vendors := make(map[string]int)
+	for _, v := range critical {
+		if v.VendorNumber == "TBS" || v.VendorNumber == "GAS" || v.VendorNumber == "GLOC" || v.VendorNumber == "COC" {
+			continue
+		}
+		vendors[v.VendorNumber] += 1
+	}
+	maps.DeleteFunc(vendors, func(k string, v int) bool {
+		return v < 2
+	})
+	var vcount []*VendorCount
+	for i, v := range vendors {
+		vendor := &VendorCount{
+			Vendor: i,
+			Items:  v,
+		}
+		vcount = append(vcount, vendor)
+	}
+	slices.SortFunc(vcount, func(a, b *VendorCount) int {
+		return cmp.Compare(b.Items, a.Items)
+	})
+	return vcount, err
 }
