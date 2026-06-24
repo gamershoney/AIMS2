@@ -201,6 +201,8 @@ func GetPriorityVendor() error {
 	if err != nil {
 		return err
 	}
+	// sortAndDedupe orders items by fill-rate priority; the sorted slice is used
+	// internally. Only the error is surfaced since this function reports success/failure.
 	_, err = sortAndDedupe(critical)
 	return err
 }

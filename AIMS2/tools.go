@@ -243,7 +243,11 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 
 	var instock bool
 	if raw, ok := tc.Function.Arguments["in_stock"]; ok {
-		instock, _ = raw.(bool)
+		var valid bool
+		instock, valid = raw.(bool)
+		if !valid {
+			fmt.Printf("stock_check: in_stock argument has unexpected type %T, defaulting to false\n", raw)
+		}
 	}
 
 	results, err := importer.SearchInventory(importer.InventoryLookUpArgs{
