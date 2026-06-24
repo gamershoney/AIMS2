@@ -6,10 +6,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -50,14 +50,14 @@ type ModelFunction struct {
 }
 
 type ModelTool struct {
-	Type     string
-	Function ModelFunction
+	Type     string        `json:"type"`
+	Function ModelFunction `json:"function"`
 }
 
 type ToolResult struct {
 	Name     string `json:"name"`
 	Response string `json:"response"`
-	Error    error  `json:"error"`
+	Error    string `json:"error,omitempty"`
 }
 
 func (r *Registry) ModelTools() []ModelTool {
@@ -111,7 +111,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	qs, ok := qry.(string)
 
 	if !ok {
-		tr.Error = errors.New("Could not find args in websearch query")
+		tr.Error = "could not find args in websearch query"
 		return tr
 	}
 	rs := func() (string, error) {
@@ -121,7 +121,12 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 		}
 		return searchResults, err
 	}
-	tr.Response, tr.Error = rs()
+	result, err := rs()
+	if err != nil {
+		tr.Error = err.Error()
+	} else {
+		tr.Response = result
+	}
 	return tr
 }
 
@@ -150,9 +155,11 @@ func RunWebSearch(qry string) (string, error) {
 	rq, err := http.NewRequest("POST", apiEndpoint, jrdr)
 	if err != nil {
 		fmt.Println("error: creating new request: ", err)
+		return "", err
 	}
+	apiKey := os.Getenv("WEB_SEARCH_API_KEY")
 	rq.Header.Set("Content-Type", "application/json")
-	rq.Header.Set("Authorization", "Bearer "+"3fb93a7acbe44f74b53612ec567268a6.rIM2NDZ_3eFZmDMkF-4QpjvJ")
+	rq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{}
 	resp, err := client.Do(rq)
@@ -165,6 +172,7 @@ func RunWebSearch(qry string) (string, error) {
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("error: Cannot read response body in web search")
+		return "", err
 	}
 
 	err = json.Unmarshal(b, &qryReturn)
@@ -225,29 +233,27 @@ func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (strin
 
 func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	qry := tc.Function.Arguments["query"]
-	instock, ok := tc.Function.Arguments["in_stock"]
-	if !ok {
-		instock = false
-	}
 	tr := ToolResult{Name: tc.Function.Name}
 
 	qs, ok := qry.(string)
 	if !ok || strings.TrimSpace(qs) == "" {
-		tr.Error = errors.New("missing required argument: part_number")
+		tr.Error = "missing required argument: query"
 		return tr
 	}
-	instock, valid := instock.(bool)
-	if !valid {
-		tr.Error = errors.New("invalid usage on instock boolean")
+
+	var instock bool
+	if raw, ok := tc.Function.Arguments["in_stock"]; ok {
+		instock, _ = raw.(bool)
 	}
+
 	results, err := importer.SearchInventory(importer.InventoryLookUpArgs{
 		Query:    qs,
-		InStock:  instock.(bool),
+		InStock:  instock,
 		Location: "1",
 		Limit:    10,
 	})
 	if err != nil {
-		tr.Error = err
+		tr.Error = err.Error()
 		return tr
 	}
 
@@ -258,7 +264,7 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 
 	response, err := t.ParseInventoryData(results)
 	if err != nil {
-		tr.Error = err
+		tr.Error = err.Error()
 		return tr
 	}
 
@@ -283,8 +289,8 @@ func (t *NotesTool) Parameters() Parameters {
 			"stock_number":    {Type: "string", Description: "enter the stock number you wish to log a note on"},
 			"note":            {Type: "string", Description: "use this to add a note to any item. this can be anything about the item either you or the user may need to remember. if the user provides insight on the item it can be logged here."},
 			"is_critical":     {Type: "boolean", Description: "use this to mark an item as critical. this can be useful when getting asked purchasing questions. mark true for critical; false for not cricical. Any item will default to false."},
-			"minimum_on_hand": {Type: "float", Description: "use this to set a minimum quantity on hand. if the user specifies a minimum quantity of an item to remain on the shelf this is a good place to log it."},
-			"target_on_hand":  {Type: "float", Description: "use this to set the target quantity to stock on the shelf when ordering."},
+			"minimum_on_hand": {Type: "number", Description: "use this to set a minimum quantity on hand. if the user specifies a minimum quantity of an item to remain on the shelf this is a good place to log it."},
+			"target_on_hand":  {Type: "number", Description: "use this to set the target quantity to stock on the shelf when ordering."},
 		},
 		Required: []string{"stock_number", "note"},
 	}
@@ -297,25 +303,26 @@ func (t *NotesTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 	sku, ok := tc.Function.Arguments["stock_number"]
 	if !ok {
-		tr.Error = errors.New("error: missing stock_number")
+		tr.Error = "error: missing stock_number"
 		return tr
 	}
 	skustring, ok := sku.(string)
 	if !ok {
-
-		fmt.Println()
-		tr.Error = errors.New("error: cannot convert type on stock_number to string")
+		tr.Error = "error: cannot convert type on stock_number to string"
+		return tr
 	}
 
 	db, err := importer.OpenDB()
 	if err != nil {
 		fmt.Println(err)
-		tr.Error = errors.New("error: could not connect to inventory database")
+		tr.Error = "error: could not connect to inventory database"
+		return tr
 	}
 	note := importer.NewNote(skustring, 1, db)
 	text, ok := tc.Function.Arguments["note"].(string)
 	if !ok {
-		tr.Error = errors.New("error: missing note")
+		tr.Error = "error: missing note"
+		return tr
 	}
 	note.Note = text
 
@@ -323,18 +330,18 @@ func (t *NotesTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	if ok {
 		note.IsCritical = critical
 	}
-	min, ok := tc.Function.Arguments["minimum_on_hand"].(float32)
+	min, ok := tc.Function.Arguments["minimum_on_hand"].(float64)
 	if ok {
-		note.MinimumOnHand = min
+		note.MinimumOnHand = float32(min)
 	}
-	target, ok := tc.Function.Arguments["target_on_hand"].(float32)
+	target, ok := tc.Function.Arguments["target_on_hand"].(float64)
 	if ok {
-		note.TargetOnHand = target
+		note.TargetOnHand = float32(target)
 	}
 	if err := note.WriteNote(); err != nil {
 		fmt.Println(err)
 		fmt.Println()
-		tr.Error = errors.New("error logging note to system")
+		tr.Error = "error logging note to system"
 	} else {
 		tr.Response = "Note saved"
 	}

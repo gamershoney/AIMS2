@@ -64,21 +64,28 @@ func getCell(row []string, indexes map[string]int, item string) string {
 func loadSheet(location string) ([]*InventoryItem, error) {
 	//l := location
 	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
-	defer func() {
-		err := f.Close()
-		if err != nil {
-			fmt.Println(err)
-		}
-	}()
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	sheet := f.GetSheetName(0)
 	if sheet == "" {
 		return nil, fmt.Errorf("error: no sheet at index")
 	}
 	indexes := make(map[string]int)
 	rows, err := f.Rows(sheet)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	if rows.Next() {
 		row, err := rows.Columns()
 		if err != nil {
@@ -112,5 +119,8 @@ func loadSheet(location string) ([]*InventoryItem, error) {
 		items = append(items, item)
 	}
 
-	return items, err
+	if err := rows.Error(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

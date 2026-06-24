@@ -15,7 +15,7 @@ func TestRunToolCalls(t *testing.T) {
 		}{
 			Index:     1,
 			Name:      "stock_check",
-			Arguments: map[string]any{"part_number": "3M-16114"},
+			Arguments: map[string]any{"query": "3M-16114"},
 		},
 	}
 

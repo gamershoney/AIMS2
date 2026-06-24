@@ -47,6 +47,7 @@ func GetNote(sku string, location int, db *sql.DB) ([]*Note, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer stmt.Close()
 	rows, err := stmt.Query(sku, location)
 	if err != nil {
 		return nil, err
@@ -89,6 +90,7 @@ func (note *Note) WriteNote() error {
 	if err != nil {
 		return err
 	}
+	defer stmt.Close()
 	_, err = stmt.Exec(&note.StockNumber, &note.Location, &note.Note, &note.IsCritical, &note.MinimumOnHand, &note.TargetOnHand)
 	if err != nil {
 		return err
@@ -128,11 +130,15 @@ func GetCriticalItems() ([]*OrderItem, error) {
 		return nil, fmt.Errorf("error on querying cricitcal items: %v\n", err)
 	}
 	for rows.Next() {
-		item := &OrderItem{}
-		rows.Scan(&item.StockNumber,
+		item := &OrderItem{
+			Note: &Note{},
+		}
+		if err := rows.Scan(&item.StockNumber,
 			&item.Note.MinimumOnHand,
 			&item.Note.IsCritical,
-			item.Note.Note)
+			&item.Note.Note); err != nil {
+			return nil, fmt.Errorf("error scanning critical item row: %v\n", err)
+		}
 		result, err := SearchInventory(InventoryLookUpArgs{
 			Query:   item.StockNumber,
 			InStock: false,
@@ -195,5 +201,6 @@ func GetPriorityVendor() error {
 	if err != nil {
 		return err
 	}
+	_, err = sortAndDedupe(critical)
 	return err
 }

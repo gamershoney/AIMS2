@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,10 +90,10 @@ func (m *Chat) SendMessage() (*Answer, error) {
 		toolResults := m.RunToolCalls(ansr.Message)
 
 		for _, tr := range toolResults {
-			if tr.Error != nil {
+			if tr.Error != "" {
 				fmt.Println("error on tool results:", tr.Error)
 
-				errResponse := fmt.Sprintf(`{"error":%q}`, tr.Error.Error())
+				errResponse := fmt.Sprintf(`{"error":%q}`, tr.Error)
 				m.AppendMessage("tool", tr.Name, errResponse)
 				continue
 			}
@@ -158,7 +157,7 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 		if !ok {
 			ch <- ToolResult{
 				Name:  v.Function.Name,
-				Error: errors.New("tool not found"),
+				Error: "tool not found",
 			}
 			continue
 		}
