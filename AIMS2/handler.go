@@ -144,15 +144,11 @@ func (m *Chat) sendOnce() (*Answer, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		errMsg := fmt.Sprintf("StatusCode: %d, response: %s", resp.StatusCode, body)
+		errMsg := fmt.Sprintf("error on sending message. StatusCode: %d\nresponse: %s", resp.StatusCode, body)
 		if m.logger != nil {
 			_ = m.logger.LogError("api_response", errMsg)
 		}
-		return nil, fmt.Errorf(
-			"error on sending message. StatusCode: %d\nresponse: %s",
-			resp.StatusCode,
-			body,
-		)
+		return nil, fmt.Errorf("%s", errMsg)
 	}
 
 	fmt.Println(string(body))

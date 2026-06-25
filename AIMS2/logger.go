@@ -123,16 +123,12 @@ func (l *ConversationLogger) LogAPIRequest(model string) error {
 
 // LogAPIResponse records the raw response received from the LLM API.
 func (l *ConversationLogger) LogAPIResponse(model string, done bool, content string) error {
-	doneStr := "false"
-	if done {
-		doneStr = "true"
-	}
 	return l.Log(LogEntry{
 		Level:   "debug",
 		Event:   "api_response",
 		Model:   model,
 		Content: content,
-		Args:    map[string]any{"done": doneStr},
+		Args:    map[string]any{"done": done},
 	})
 }
 
