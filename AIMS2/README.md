@@ -1,19 +1,44 @@
-# README
+# AIMS2 application
 
-## About
+This directory contains the Wails desktop application for AIMS2. The backend is written in Go, the frontend is built with Vite, and inventory data is stored in the local SQLite files under `importer/`.
 
-This is the official Wails Vanilla template.
+## Main pieces
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+- `main.go` - Wails application entry point
+- `app.go` - bindings exposed to the frontend
+- `handler.go` - chat request flow and tool-call loop
+- `tools.go` - AI tool registry for inventory lookups, notes, vendor prioritization, and web search
+- `importer/` - spreadsheet import, database access, search, and notes
+- `frontend/` - desktop UI assets and JavaScript
 
-## Live Development
+## Development
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+Run commands from this directory:
 
-## Building
+```bash
+go test ./...
+```
 
-To build a redistributable, production mode package, use `wails build`.
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+```bash
+wails dev
+```
+
+## Build
+
+To create a production desktop bundle:
+
+```bash
+wails build
+```
+
+## Notes
+
+- The importer opens `./importer/inventory.db`, so the working directory matters for tests and local runs.
+- The frontend build is wired through `wails.json` with `npm install` and `npm run build`.
+- The current Go test suite depends on local importer database access and presently fails when that database cannot be opened by the test environment.
