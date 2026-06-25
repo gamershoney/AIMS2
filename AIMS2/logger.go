@@ -11,11 +11,18 @@ import (
 
 const conversationLogPath = "conversation_log.jsonl"
 
+// LogEntry is a single structured NDJSON log record. Every field that is not
+// applicable to a given event is omitted from the output.
 type LogEntry struct {
-	Timestamp string `json:"timestamp"`
-	Role      string `json:"role"`
-	ToolName  string `json:"tool_name,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Timestamp string         `json:"timestamp"`
+	Level     string         `json:"level"`
+	Event     string         `json:"event"`
+	Role      string         `json:"role,omitempty"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	Model     string         `json:"model,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Args      map[string]any `json:"args,omitempty"`
 }
 
 type ConversationLogger struct {
@@ -30,12 +37,16 @@ func NewConversationLogger(path string) *ConversationLogger {
 	return &ConversationLogger{path: path}
 }
 
-func (l *ConversationLogger) Append(role, toolName, content string) error {
+// Log writes a single LogEntry as one NDJSON line. It is the core write method
+// used by all typed helpers.
+func (l *ConversationLogger) Log(entry LogEntry) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil && filepath.Dir(l.path) != "." {
-		return fmt.Errorf("create log dir: %w", err)
+	if dir := filepath.Dir(l.path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create log dir: %w", err)
+		}
 	}
 
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -44,11 +55,8 @@ func (l *ConversationLogger) Append(role, toolName, content string) error {
 	}
 	defer f.Close()
 
-	entry := LogEntry{
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
-		Role:      role,
-		ToolName:  toolName,
-		Content:   content,
+	if entry.Timestamp == "" {
+		entry.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
 	b, err := json.Marshal(entry)
@@ -61,4 +69,78 @@ func (l *ConversationLogger) Append(role, toolName, content string) error {
 	}
 
 	return nil
+}
+
+// Append records a conversation message (user / assistant / system / tool).
+func (l *ConversationLogger) Append(role, toolName, content string) error {
+	return l.LogMessage(role, toolName, content)
+}
+
+// LogMessage records a conversation message event.
+func (l *ConversationLogger) LogMessage(role, toolName, content string) error {
+	return l.Log(LogEntry{
+		Level:    "info",
+		Event:    "message",
+		Role:     role,
+		ToolName: toolName,
+		Content:  content,
+	})
+}
+
+// LogToolCall records that the model requested a tool invocation.
+func (l *ConversationLogger) LogToolCall(name string, args map[string]any) error {
+	return l.Log(LogEntry{
+		Level:    "info",
+		Event:    "tool_call",
+		ToolName: name,
+		Args:     args,
+	})
+}
+
+// LogToolResult records the outcome of a tool execution.
+func (l *ConversationLogger) LogToolResult(name, response string, callErr error) error {
+	entry := LogEntry{
+		Level:    "info",
+		Event:    "tool_result",
+		ToolName: name,
+		Content:  response,
+	}
+	if callErr != nil {
+		entry.Level = "error"
+		entry.Error = callErr.Error()
+	}
+	return l.Log(entry)
+}
+
+// LogAPIRequest records an outbound request to the LLM API.
+func (l *ConversationLogger) LogAPIRequest(model string) error {
+	return l.Log(LogEntry{
+		Level: "debug",
+		Event: "api_request",
+		Model: model,
+	})
+}
+
+// LogAPIResponse records the raw response received from the LLM API.
+func (l *ConversationLogger) LogAPIResponse(model string, done bool, content string) error {
+	doneStr := "false"
+	if done {
+		doneStr = "true"
+	}
+	return l.Log(LogEntry{
+		Level:   "debug",
+		Event:   "api_response",
+		Model:   model,
+		Content: content,
+		Args:    map[string]any{"done": doneStr},
+	})
+}
+
+// LogError records an error event.
+func (l *ConversationLogger) LogError(event, msg string) error {
+	return l.Log(LogEntry{
+		Level: "error",
+		Event: event,
+		Error: msg,
+	})
 }

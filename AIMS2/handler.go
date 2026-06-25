@@ -34,6 +34,7 @@ type Chat struct {
 	Tools     []ModelTool `json:"tools,omitempty"`
 
 	registry *Registry
+	logger   *ConversationLogger
 }
 
 type ToolCall struct {
@@ -67,6 +68,9 @@ func (m *Chat) SendMessage() (*Answer, error) {
 	for round := 0; round < maxToolRounds; round++ {
 		ansr, err := m.sendOnce()
 		if err != nil {
+			if m.logger != nil {
+				_ = m.logger.LogError("send_message", err.Error())
+			}
 			return nil, err
 		}
 
@@ -104,6 +108,9 @@ func (m *Chat) SendMessage() (*Answer, error) {
 		}
 	}
 
+	if m.logger != nil {
+		_ = m.logger.LogError("send_message", "too many tool call rounds")
+	}
 	return nil, fmt.Errorf("too many tool call rounds")
 }
 
@@ -116,10 +123,17 @@ func (m *Chat) sendOnce() (*Answer, error) {
 	fmt.Println("MESSAGES SENT TO MODEL:")
 	fmt.Println(string(b))
 
+	if m.logger != nil {
+		_ = m.logger.LogAPIRequest(m.Model)
+	}
+
 	br := bytes.NewReader(b)
 
 	resp, err := http.Post(apiUrl+"chat", "application/json", br)
 	if err != nil {
+		if m.logger != nil {
+			_ = m.logger.LogError("api_request", err.Error())
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -130,6 +144,10 @@ func (m *Chat) sendOnce() (*Answer, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		errMsg := fmt.Sprintf("StatusCode: %d, response: %s", resp.StatusCode, body)
+		if m.logger != nil {
+			_ = m.logger.LogError("api_response", errMsg)
+		}
 		return nil, fmt.Errorf(
 			"error on sending message. StatusCode: %d\nresponse: %s",
 			resp.StatusCode,
@@ -146,6 +164,10 @@ func (m *Chat) sendOnce() (*Answer, error) {
 		return nil, fmt.Errorf("unmarshal chat response: %w", err)
 	}
 
+	if m.logger != nil {
+		_ = m.logger.LogAPIResponse(ansr.Model, ansr.Done, ansr.Message.Content)
+	}
+
 	return ansr, nil
 }
 
@@ -156,11 +178,18 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 	for _, v := range ai.ToolCalls {
 		tool, ok := m.registry.tools[v.Function.Name]
 		if !ok {
+			if m.logger != nil {
+				_ = m.logger.LogError("tool_call", fmt.Sprintf("tool not found: %s", v.Function.Name))
+			}
 			ch <- ToolResult{
 				Name:  v.Function.Name,
 				Error: errors.New("tool not found"),
 			}
 			continue
+		}
+
+		if m.logger != nil {
+			_ = m.logger.LogToolCall(v.Function.Name, v.Function.Arguments)
 		}
 
 		go func(t ToolCall) {
@@ -169,6 +198,10 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 			// Make sure the result has the tool name.
 			if result.Name == "" {
 				result.Name = t.Function.Name
+			}
+
+			if m.logger != nil {
+				_ = m.logger.LogToolResult(result.Name, result.Response, result.Error)
 			}
 
 			ch <- result
@@ -196,6 +229,10 @@ func (m *Chat) AppendMessage(role string, toolname string, text string) {
 	}
 
 	m.Messages = append(m.Messages, msg)
+
+	if m.logger != nil {
+		_ = m.logger.LogMessage(role, toolname, text)
+	}
 }
 
 func (m *Chat) AppendAssistantMessage(ai AIMessage) {

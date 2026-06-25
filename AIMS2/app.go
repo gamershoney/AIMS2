@@ -14,7 +14,8 @@ type App struct {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	newChat := &Chat{Model: gemmaModel, KeepAlive: defKeepAlive, Stream: false}
+	logger := NewConversationLogger("")
+	newChat := &Chat{Model: gemmaModel, KeepAlive: defKeepAlive, Stream: false, logger: logger}
 	Reg := InitializeTools()
 	newChat.Tools = Reg.ModelTools()
 	newChat.registry = Reg
