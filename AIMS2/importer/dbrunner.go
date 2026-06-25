@@ -1,10 +1,12 @@
 package importer
 
 import (
+	"cmp"
 	"database/sql"
 	_ "embed"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -136,7 +138,7 @@ const (
 	ConfidenceExactStockNumber      = 100
 	ConfidenceExactVendorPartNumber = 95
 	ConfidencePartialStockNumber    = 85
-	ConfidenceLowPartialStockNumber = 70
+	ConfidenceLowPartialStockNumber = 45
 	ConfidenceDescriptionAllWords   = 60
 	ConfidenceDescriptionAnyWord    = 35
 )
@@ -209,7 +211,275 @@ func (il *InvenentoryLookup) checkExactStockNumber() ([]*ReturnResult, error) {
 		ra = append(ra, rr)
 		fmt.Printf("Appended %+v\n", rr)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return ra, nil
+}
+
+func normalizeSearch(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
+}
+
+func scoreResult(r *ReturnResult, query string) int {
+	if r == nil {
+		return 0
+	}
+
+	item := r.Item
+
+	qNorm := normalizeSearch(query)
+	stockNorm := normalizeSearch(item.StockNumber)
+	vendorProdNorm := normalizeSearch(item.VendorProdNumber)
+	descUpper := strings.ToUpper(item.Description)
+	descNorm := normalizeSearch(item.Description)
+	vendorUpper := strings.ToUpper(strings.TrimSpace(item.VendorNumber))
+	queryUpper := strings.ToUpper(query)
+
+	score := r.ConfidenceScore
+
+	if stockNorm == qNorm {
+		score += 200
+	}
+
+	if vendorProdNorm == qNorm {
+		score += 180
+	}
+
+	if qNorm != "" && strings.Contains(stockNorm, qNorm) {
+		score += 100
+	}
+
+	if qNorm != "" && strings.Contains(vendorProdNorm, qNorm) {
+		score += 90
+	}
+
+	cleanTokens := CleanTokens(query)
+
+	for _, token := range cleanTokens {
+		tNorm := normalizeSearch(token)
+
+		if tNorm == "" {
+			continue
+		}
+
+		tokenStrong := hasLettersAndDigits(tNorm) && len(tNorm) >= 4
+
+		if strings.Contains(stockNorm, tNorm) {
+			if tokenStrong {
+				score += 80
+			} else {
+				score += 20
+			}
+		}
+
+		if strings.Contains(vendorProdNorm, tNorm) {
+			if tokenStrong {
+				score += 70
+			} else {
+				score += 15
+			}
+		}
+
+		if strings.Contains(descNorm, tNorm) {
+			if tokenStrong {
+				score += 60
+			} else {
+				score += 10
+			}
+		}
+	}
+
+	if strings.Contains(queryUpper, "TIG") {
+		if strings.Contains(descUpper, "TIG") {
+			score += 25
+		}
+
+		if strings.Contains(descUpper, "WIRE") || strings.Contains(descUpper, "ROD") {
+			score += 25
+		}
+	}
+
+	if strings.Contains(queryUpper, "ROD") {
+		if strings.Contains(descUpper, "ROD") || strings.Contains(descUpper, "WIRE") {
+			score += 20
+		}
+	}
+
+	if strings.Contains(normalizeSearch(query), "70S6") {
+		if strings.Contains(stockNorm, "70S6") ||
+			strings.Contains(vendorProdNorm, "70S6") ||
+			strings.Contains(descNorm, "70S6") {
+			score += 100
+		} else {
+			score -= 100
+		}
+	}
+
+	if strings.Contains(queryUpper, "OXF") || strings.Contains(queryUpper, "OXFORD") {
+		if vendorUpper == "OXFO" || strings.Contains(stockNorm, "OXF") {
+			score += 60
+		} else {
+			score -= 30
+		}
+	}
+
+	if strings.Contains(queryUpper, "ROD") || strings.Contains(queryUpper, "WIRE") || strings.Contains(normalizeSearch(query), "70S6") {
+		badCategories := []string{
+			"TORCH",
+			"WELDER",
+			"RENTAL",
+			"PARTS KIT",
+			"TIG PEN",
+			"ASSY",
+			"COVER",
+		}
+
+		for _, bad := range badCategories {
+			if strings.Contains(descUpper, bad) {
+				score -= 100
+			}
+		}
+	}
+
+	if item.OnHand > 0 {
+		score += 10
+	}
+
+	return score
+}
+
+func CleanTokens(s string) []string {
+	up := strings.ToUpper(strings.TrimSpace(s))
+
+	var tokens []string
+	var b strings.Builder
+
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+
+		token := b.String()
+
+		if len(token) >= 3 {
+			tokens = append(tokens, token)
+		}
+
+		b.Reset()
+	}
+
+	for _, r := range up {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) {
+			b.WriteRune(r)
+			continue
+		}
+
+		flush()
+	}
+
+	flush()
+
+	return tokens
+}
+
+func LikeTokens(s string) []string {
+	clean := CleanTokens(s)
+
+	likes := make([]string, 0, len(clean))
+	for _, token := range clean {
+		likes = append(likes, "%"+token+"%")
+	}
+
+	return likes
+}
+
+func hasLettersAndDigits(s string) bool {
+	hasLetter := false
+	hasDigit := false
+
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+
+		if unicode.IsDigit(r) {
+			hasDigit = true
+		}
+	}
+
+	return hasLetter && hasDigit
+}
+
+func StrongLikeTokens(query string) []string {
+	clean := CleanTokens(query)
+
+	var strong []string
+	for _, token := range clean {
+		if hasLettersAndDigits(token) && len(token) >= 4 {
+			strong = append(strong, "%"+token+"%")
+		}
+	}
+
+	return strong
+}
+
+func finalizeResults(results []*ReturnResult, query string, limit int) []*ReturnResult {
+	if limit <= 0 {
+		limit = 8
+	}
+
+	seen := make(map[string]*ReturnResult)
+
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+
+		key := fmt.Sprintf("%.0f:%s", r.Item.Location, strings.ToUpper(strings.TrimSpace(r.Item.StockNumber)))
+
+		score := scoreResult(r, query)
+		r.ConfidenceScore = score
+
+		existing, ok := seen[key]
+		if !ok || score > existing.ConfidenceScore {
+			seen[key] = r
+		}
+	}
+
+	deduped := make([]*ReturnResult, 0, len(seen))
+	for _, r := range seen {
+		deduped = append(deduped, r)
+	}
+
+	slices.SortStableFunc(deduped, func(a, b *ReturnResult) int {
+		return cmp.Compare(b.ConfidenceScore, a.ConfidenceScore)
+	})
+
+	filtered := deduped[:0]
+	for _, r := range deduped {
+		if r.ConfidenceScore < 50 {
+			continue
+		}
+
+		filtered = append(filtered, r)
+	}
+
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+
+	return filtered
 }
 
 func Tokenize(s string) []string {
@@ -281,7 +551,7 @@ func (il *InvenentoryLookup) descriptionQuery(s string, instock int, stmt *sql.S
 		il.Results = append(il.Results, rr)
 
 	}
-	return err
+	return rows.Err()
 }
 
 func (il *InvenentoryLookup) partialQuery(s string, instock int, stmt *sql.Stmt, location string, limit int, confidence int, reason string) error {
@@ -318,7 +588,7 @@ func (il *InvenentoryLookup) partialQuery(s string, instock int, stmt *sql.Stmt,
 		il.Results = append(il.Results, rr)
 
 	}
-	return err
+	return rows.Err()
 }
 
 func (il *InvenentoryLookup) checkPartialStockNumber() error {
@@ -341,19 +611,27 @@ func (il *InvenentoryLookup) checkPartialStockNumber() error {
 	} else {
 		stock = -1
 	}
-	qry := il.Args.Query
-	tokens := Tokenize(qry)
 
-	for _, v := range tokens {
-		var err error
-		switch {
-		case len(v) > 2:
-			err = il.partialQuery(v, stock, stmt, il.Args.Location, il.Args.Limit, ConfidencePartialStockNumber, "Matched a text token greater than 2 characters.")
+	tokens := StrongLikeTokens(il.Args.Query)
+	confidence := ConfidencePartialStockNumber
+	reason := "Matched a strong part-number token."
 
-		case len(v) <= 2:
+	if len(tokens) == 0 {
+		tokens = LikeTokens(il.Args.Query)
+		confidence = ConfidenceLowPartialStockNumber
+		reason = "Matched a weak part-number token."
+	}
 
-			err = il.partialQuery(v, stock, stmt, il.Args.Location, il.Args.Limit, ConfidenceLowPartialStockNumber, "Matched a text token of less than 3 characters.")
-		}
+	for _, token := range tokens {
+		err := il.partialQuery(
+			token,
+			stock,
+			stmt,
+			il.Args.Location,
+			il.Args.Limit,
+			confidence,
+			reason,
+		)
 		if err != nil {
 			return err
 		}
@@ -404,24 +682,45 @@ LIMIT ?`)
 		ConfidenceDescriptionAllWords,
 		"Description matched full query phrase.",
 	)
-
-	tokens := Tokenize(il.Args.Query)
-
-	for _, token := range tokens {
-		err := il.descriptionQuery(
-			token,
-			stock,
-			stmt,
-			il.Args.Location,
-			5,
-			ConfidenceDescriptionAnyWord,
-			"Description matched a query token.",
-		)
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return err
 	}
 
+	strongTokens := StrongLikeTokens(il.Args.Query)
+
+	if len(strongTokens) > 0 {
+		for _, token := range strongTokens {
+			err := il.descriptionQuery(
+				token,
+				stock,
+				stmt,
+				il.Args.Location,
+				5,
+				ConfidenceDescriptionAnyWord,
+				"Description matched a strong query token.",
+			)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		tokens := LikeTokens(il.Args.Query)
+
+		for _, token := range tokens {
+			err := il.descriptionQuery(
+				token,
+				stock,
+				stmt,
+				il.Args.Location,
+				5,
+				ConfidenceDescriptionAnyWord,
+				"Description matched a query token.",
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return err
 }
 
@@ -478,6 +777,8 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 			return nil, err
 		}
 	}
+	il.Results = finalizeResults(il.Results, args.Query, args.Limit)
+
 	for _, v := range il.Results {
 		note, err := AttachNotes(v.Item.StockNumber, int(v.Item.Location), il.db)
 		if err != nil {
@@ -488,6 +789,7 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 			v.Note = note
 		}
 	}
-	fmt.Printf("Returning results on inventory: %+v\n", &il.Results)
-	return il.Results, err
+
+	fmt.Printf("Returning %d results on inventory\n", len(il.Results))
+	return il.Results, nil
 }
