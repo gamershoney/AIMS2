@@ -94,14 +94,14 @@ func (t *WebSearchTool) Name() string {
 }
 
 func (t *WebSearchTool) Description() string {
-	return "use to return a set of search results from the google api"
+	return "USE WHEN: the user needs public manufacturer information, specifications, compatibility, manuals, or discontinued-item research. DO NOT USE FOR: company stock, price, cost, usage, notes, or purchasing history. For company inventory, use stock_check first and item_details second."
 }
 
 func (t *WebSearchTool) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"Query": {Type: "string", Description: "Enter the query you would like to search"},
+			"Query": {Type: "string", Description: "Public-web search terms. Include the manufacturer and exact part number when known."},
 		},
 		Required: []string{"Query"},
 	}
@@ -113,7 +113,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	qs, ok := qry.(string)
 
 	if !ok {
-		tr.Error = errors.New("Could not find args in websearch query")
+		tr.Error = errors.New("could not find args in websearch query")
 		return tr
 	}
 	rs := func() (string, error) {
@@ -202,22 +202,59 @@ func (t *StockCheck) Name() string {
 }
 
 func (t *StockCheck) Description() string {
-	return "use when to check if our company stocks an item by part number. Will return an item with the location it was found in, the part number found, the description of the item, how many are on hand,  a confidence score with a minimum of 0 and a maximum of 100, and how the item was matched along with other useful information."
+	return "USE WHEN: finding whether the company carries an item or discovering its exact internal stock_number from a part number, vendor part number, description, or keyword. RETURNS: compact candidates with stock_number, description, on_hand, confidence_score, and match_type. NEXT: call item_details only for candidates needing full data. DO NOT USE: when an exact internal stock_number is already known and full details are requested."
 }
 
 func (t *StockCheck) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"query":    {Type: "string", Description: "Enter the exact part number or keyphrase you would like to search our inventory for."},
-			"in_stock": {Type: "boolean", Description: "enter true if the item must be in stock, enter false if the item does not need to be in stock."},
+			"query":    {Type: "string", Description: "Part number, vendor part number, description, or keywords. Preserve exact part-number punctuation."},
+			"in_stock": {Type: "boolean", Description: "True excludes zero-on-hand items. False includes out-of-stock items and is preferred for item identification."},
 		},
 		Required: []string{"query"},
 	}
 }
 
+type StockCheckMatch struct {
+	StockNumber     string  `json:"stock_number"`
+	Description     string  `json:"description"`
+	OnHand          float64 `json:"on_hand"`
+	ConfidenceScore int     `json:"confidence_score"`
+	MatchType       string  `json:"match_type"`
+}
+
+type StockCheckResponse struct {
+	Count   int               `json:"count"`
+	Results []StockCheckMatch `json:"results"`
+	Message string            `json:"message,omitempty"`
+}
+
 func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (string, error) {
-	b, err := json.MarshalIndent(results, "", "  ")
+	response := StockCheckResponse{
+		Count:   len(results),
+		Results: make([]StockCheckMatch, 0, len(results)),
+	}
+
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+
+		response.Results = append(response.Results, StockCheckMatch{
+			StockNumber:     result.Item.StockNumber,
+			Description:     result.Item.Description,
+			OnHand:          result.Item.OnHand,
+			ConfidenceScore: result.ConfidenceScore,
+			MatchType:       result.MatchType,
+		})
+	}
+	response.Count = len(response.Results)
+	if response.Count == 0 {
+		response.Message = "no results found"
+	}
+
+	b, err := json.Marshal(response)
 	if err != nil {
 		return "", fmt.Errorf("marshal inventory results: %w", err)
 	}
@@ -235,26 +272,22 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 
 	qs, ok := qry.(string)
 	if !ok || strings.TrimSpace(qs) == "" {
-		tr.Error = errors.New("missing required argument: part_number")
+		tr.Error = errors.New("missing required argument: query")
 		return tr
 	}
-	instock, valid := instock.(bool)
+	inStockOnly, valid := instock.(bool)
 	if !valid {
 		tr.Error = errors.New("invalid usage on instock boolean")
+		return tr
 	}
 	results, err := importer.SearchInventory(importer.InventoryLookUpArgs{
 		Query:    qs,
-		InStock:  instock.(bool),
+		InStock:  inStockOnly,
 		Location: "1",
 		Limit:    10,
 	})
 	if err != nil {
 		tr.Error = err
-		return tr
-	}
-
-	if len(results) == 0 {
-		tr.Response = `{"results":[],"message":"no results found"}`
 		return tr
 	}
 
@@ -275,18 +308,18 @@ func (t *NotesTool) Name() string {
 }
 
 func (t *NotesTool) Description() string {
-	return "use this tool to log any notes on an inventory item. these notes are returned to you when the stock_check tool is called. use this when the user asks you to remember anything on an item. please have an exact stock_number when adding a note or the tool will fail. If you do not already have an exact stock_number use the stock_check to find it."
+	return "STATE-CHANGING TOOL. USE WHEN: the user explicitly asks to save or update an item note, critical flag, minimum_on_hand, or target_on_hand. REQUIRES: an exact internal stock_number. Use stock_check first if unknown; use item_details first when existing values must be reviewed. DO NOT USE: to read notes, inspect an item, or save an unconfirmed inference."
 }
 
 func (t *NotesTool) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"stock_number":    {Type: "string", Description: "enter the stock number you wish to log a note on"},
-			"note":            {Type: "string", Description: "use this to add a note to any item. this can be anything about the item either you or the user may need to remember. if the user provides insight on the item it can be logged here."},
-			"is_critical":     {Type: "boolean", Description: "use this to mark an item as critical. this can be useful when getting asked purchasing questions. mark true for critical; false for not cricical. Any item will default to false."},
-			"minimum_on_hand": {Type: "float", Description: "use this to set a minimum quantity on hand. if the user specifies a minimum quantity of an item to remain on the shelf this is a good place to log it."},
-			"target_on_hand":  {Type: "float", Description: "use this to set the target quantity to stock on the shelf when ordering."},
+			"stock_number":    {Type: "string", Description: "Exact internal stock_number from stock_check or the user."},
+			"note":            {Type: "string", Description: "Concise, business-relevant note explicitly requested by the user."},
+			"is_critical":     {Type: "boolean", Description: "Set only when the user explicitly marks or unmarks the item as critical."},
+			"minimum_on_hand": {Type: "float", Description: "User-approved minimum quantity. Omit if not provided."},
+			"target_on_hand":  {Type: "float", Description: "User-approved replenishment target. Omit if not provided."},
 		},
 		Required: []string{"stock_number", "note"},
 	}
@@ -351,7 +384,7 @@ func (t *PriorityVendor) Name() string {
 }
 
 func (t *PriorityVendor) Description() string {
-	return "use to generate a list of vendors and how many items that vendor has below average monthly usage. this is useful when trying to figure out which vendor needs to be ordered from the soonest. this requires no parameters just a tool call."
+	return "USE WHEN: the user asks which vendors need purchasing attention first or requests a broad reorder-priority overview. RETURNS: vendor numbers ranked by count of critical or high-turn low-stock items. DOES NOT RETURN: item lists, quantities to order, or purchase orders. Use stock_check and item_details to investigate specific items afterward."
 }
 
 func (t *PriorityVendor) Parameters() Parameters {
@@ -382,14 +415,14 @@ func (t *ItemDetails) Name() string {
 }
 
 func (t *ItemDetails) Description() string {
-	return "use to look up more information from our inventory data on a specific item by passing in a stock_number."
+	return "USE WHEN: full company data is needed for one item whose exact internal stock_number is known. RETURNS: vendor, price, cost, on_hand, average usage, transaction dates, notes, and stocking settings. DO NOT USE: for keywords, descriptions, uncertain part numbers, or finding candidates; use stock_check first. READ-ONLY: this tool never changes inventory data."
 }
 
 func (t *ItemDetails) Parameters() Parameters {
 	return Parameters{
 		Type: "object",
 		Properties: map[string]Property{
-			"stock_number": {Type: "string", Description: "Enter the stock_number you would like to get more information on."},
+			"stock_number": {Type: "string", Description: "Exact internal stock_number only. Do not pass keywords, descriptions, or uncertain vendor part numbers."},
 		},
 		Required: []string{"stock_number"},
 	}
