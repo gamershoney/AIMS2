@@ -22,6 +22,7 @@ func InitializeTools() *Registry {
 	r.Register(&StockCheck{})
 	r.Register(&NotesTool{})
 	r.Register(&PriorityVendor{})
+	r.Register(&ItemDetails{})
 	return r
 }
 
@@ -372,4 +373,53 @@ func (t *PriorityVendor) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 	tr.Response = string(b)
 	return *tr
+}
+
+type ItemDetails struct{}
+
+func (t *ItemDetails) Name() string {
+	return "item_details"
+}
+
+func (t *ItemDetails) Description() string {
+	return "use to look up more information from our inventory data on a specific item by passing in a stock_number."
+}
+
+func (t *ItemDetails) Parameters() Parameters {
+	return Parameters{
+		Type: "object",
+		Properties: map[string]Property{
+			"stock_number": {Type: "string", Description: "Enter the stock_number you would like to get more information on."},
+		},
+		Required: []string{"stock_number"},
+	}
+}
+
+func (t *ItemDetails) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	tr := ToolResult{
+		Name:     tc.Function.Name,
+		Response: "",
+	}
+
+	sku, ok := tc.Function.Arguments["stock_number"].(string)
+	if !ok {
+		tr.Error = errors.New("missing argument stock_number")
+	}
+	result, err := importer.SingleSearch(importer.InventoryLookUpArgs{
+		Query:    sku,
+		InStock:  false,
+		Location: "1",
+		Limit:    1,
+	})
+	if err != nil {
+		tr.Error = fmt.Errorf("error: %v", err)
+		return tr
+	}
+	b, err := json.MarshalIndent(result, "", "")
+	if err != nil {
+		tr.Error = errors.New("could not parse returning inventory data")
+		return tr
+	}
+	tr.Response = string(b)
+	return tr
 }

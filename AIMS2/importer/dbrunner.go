@@ -793,3 +793,28 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 	fmt.Printf("Returning %d results on inventory\n", len(il.Results))
 	return il.Results, nil
 }
+
+func SingleSearch(args InventoryLookUpArgs) (*ReturnResult, error) {
+	fmt.Printf("Running detailed item query for: %+v\n", args)
+
+	args.Limit = 1
+
+	args.Location = "1"
+
+	db, err := OpenDB()
+	if err != nil {
+		return nil, err
+	}
+	il := &InvenentoryLookup{
+		db:   db,
+		Args: args,
+	}
+
+	items, err := il.checkExactStockNumber()
+	if len(items) <= 0 {
+		return nil, errors.New("error: no items found")
+	}
+	item := items[0]
+
+	return item, err
+}
