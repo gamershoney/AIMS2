@@ -34,6 +34,7 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 		{
 			Item: importer.InventoryItem{
 				StockNumber:      "3M-16114",
+				Location:         1,
 				Description:      "Example inventory item",
 				VendorNumber:     "3M",
 				VendorProdNumber: "16114",
@@ -77,8 +78,11 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 		match.ConfidenceScore,
 		match.MatchType,
 	)
-	if match.StockNumber != "3M-16114" || match.OnHand != 4 || match.ConfidenceScore != 100 {
+	if match.StockNumber != "3M-16114" || match.StoreID != 1 || match.OnHand != 4 || match.ConfidenceScore != 100 {
 		t.Fatalf("unexpected compact match: %+v", match)
+	}
+	if match.HasNote {
+		t.Fatalf("expected has_note to be false for result without a note")
 	}
 
 	var fields map[string]any
@@ -98,6 +102,80 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 			t.Errorf("compact result unexpectedly includes %q", omitted)
 		} else {
 			t.Logf("confirmed omitted field: %s", omitted)
+		}
+	}
+}
+
+func TestStockCheckParseInventoryDataIncludesNoteWhenPresent(t *testing.T) {
+	tool := &StockCheck{}
+	results := []*importer.ReturnResult{
+		{
+			Item: importer.InventoryItem{
+				Location:    1,
+				StockNumber: "3M-16114",
+				Description: "Example inventory item",
+				OnHand:      4,
+			},
+			Note: &importer.Note{
+				StockNumber:   "3M-16114",
+				Location:      1,
+				Note:          "Keep extra on hand for contract customer",
+				IsCritical:    true,
+				MinimumOnHand: 6,
+				TargetOnHand:  12,
+			},
+			HasNote:         true,
+			ConfidenceScore: 100,
+			MatchType:       "Exact Stock Number",
+		},
+	}
+
+	raw, err := tool.ParseInventoryData(results)
+	if err != nil {
+		t.Fatalf("parse inventory data with note: %v", err)
+	}
+	t.Logf("compact stock_check response with note: %s", raw)
+
+	var response StockCheckResponse
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("unmarshal compact response with note: %v", err)
+	}
+	if response.Count != 1 || len(response.Results) != 1 {
+		t.Fatalf("expected one result, got count=%d results=%d", response.Count, len(response.Results))
+	}
+
+	match := response.Results[0]
+	if !match.HasNote {
+		t.Fatalf("expected has_note to be true")
+	}
+	if match.Note == "" {
+		t.Fatalf("expected note to be included when present")
+	}
+	if !match.IsCritical {
+		t.Fatalf("expected critical note flag")
+	}
+	if match.Note != "Keep extra on hand for contract customer" {
+		t.Fatalf("unexpected note text: %q", match.Note)
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		t.Fatalf("unmarshal response fields: %v", err)
+	}
+	encodedResults, ok := fields["results"].([]any)
+	if !ok || len(encodedResults) != 1 {
+		t.Fatalf("missing compact results: %s", raw)
+	}
+	encodedMatch, ok := encodedResults[0].(map[string]any)
+	if !ok {
+		t.Fatalf("invalid compact result: %s", raw)
+	}
+	if _, exists := encodedMatch["note"]; !exists {
+		t.Fatalf("expected serialized note field: %s", raw)
+	}
+	for _, omitted := range []string{"price", "cost", "avg_usage", "vendor_number", "vendor_product_number", "last_sale"} {
+		if _, exists := encodedMatch[omitted]; exists {
+			t.Errorf("compact result unexpectedly includes %q", omitted)
 		}
 	}
 }

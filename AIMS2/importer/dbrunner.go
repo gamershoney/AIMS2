@@ -129,6 +129,7 @@ type InventoryLookUpArgs struct {
 }
 type ReturnResult struct {
 	Item            InventoryItem `json:"item"`
+	HasNote         bool          `json:"has_note"`
 	Note            *Note         `json:"note,omitempty"`
 	ConfidenceScore int           `json:"confidence_score"`
 	MatchType       string        `json:"match_type"`
@@ -787,6 +788,9 @@ func SearchInventory(args InventoryLookUpArgs) ([]*ReturnResult, error) {
 		}
 		if note != nil {
 			v.Note = note
+			v.HasNote = true
+		} else {
+			v.HasNote = false
 		}
 	}
 
@@ -811,10 +815,21 @@ func SingleSearch(args InventoryLookUpArgs) (*ReturnResult, error) {
 	}
 
 	items, err := il.checkExactStockNumber()
+	if err != nil {
+		return nil, err
+	}
 	if len(items) <= 0 {
 		return nil, errors.New("error: no items found")
 	}
 	item := items[0]
-
+	note, err := GetNote(item.Item.StockNumber, int(item.Item.Location), db)
+	if err != nil {
+		return nil, err
+	}
+	item.HasNote = false
+	if len(note) > 0 {
+		item.HasNote = true
+		item.Note = note[0]
+	}
 	return item, err
 }

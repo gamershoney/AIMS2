@@ -11,9 +11,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
-const apiEndpoint = "https://ollama.com/api/web_search"
+const (
+	apiEndpoint     = "https://ollama.com/api/web_search"
+	maxToolResponse = 12000
+)
 
 func InitializeTools() *Registry {
 	r := &Registry{}
@@ -60,6 +64,20 @@ type ToolResult struct {
 	Name     string `json:"name"`
 	Response string `json:"response"`
 	Error    error  `json:"error"`
+}
+
+func (tr ToolResult) truncate(max int) string {
+	s := tr.Response
+	if len(s) <= max {
+		return s
+	}
+
+	cut := max
+	for cut > 0 && !utf8.ValidString(s[:cut]) {
+		cut--
+	}
+
+	return s[:cut] + "\n\n[tool response trucated]"
 }
 
 func (r *Registry) ModelTools() []ModelTool {
@@ -218,10 +236,14 @@ func (t *StockCheck) Parameters() Parameters {
 
 type StockCheckMatch struct {
 	StockNumber     string  `json:"stock_number"`
+	StoreID         float64 `json:"store_id"`
 	Description     string  `json:"description"`
 	OnHand          float64 `json:"on_hand"`
 	ConfidenceScore int     `json:"confidence_score"`
 	MatchType       string  `json:"match_type"`
+	HasNote         bool    `json:"has_note"`
+	Note            string  `json:"note,omitempty"`
+	IsCritical      bool    `json:"is_critical,omitempty"`
 }
 
 type StockCheckResponse struct {
@@ -241,13 +263,21 @@ func (t *StockCheck) ParseInventoryData(results []*importer.ReturnResult) (strin
 			continue
 		}
 
-		response.Results = append(response.Results, StockCheckMatch{
+		match := StockCheckMatch{
 			StockNumber:     result.Item.StockNumber,
+			StoreID:         result.Item.Location,
 			Description:     result.Item.Description,
 			OnHand:          result.Item.OnHand,
 			ConfidenceScore: result.ConfidenceScore,
 			MatchType:       result.MatchType,
-		})
+			HasNote:         result.HasNote,
+		}
+		if result.Note != nil {
+			match.Note = result.Note.Note
+			match.IsCritical = result.Note.IsCritical
+		}
+
+		response.Results = append(response.Results, match)
 	}
 	response.Count = len(response.Results)
 	if response.Count == 0 {

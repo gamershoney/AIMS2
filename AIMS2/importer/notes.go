@@ -290,5 +290,8 @@ func GetPriorityVendor() ([]*VendorCount, error) {
 	slices.SortFunc(vcount, func(a, b *VendorCount) int {
 		return cmp.Compare(b.Items, a.Items)
 	})
+	if len(vcount) > 6 {
+		vcount = vcount[:6]
+	}
 	return vcount, err
 }

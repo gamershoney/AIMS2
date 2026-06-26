@@ -208,6 +208,7 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 
 	for range ai.ToolCalls {
 		result := <-ch
+		result.Response = result.truncate(maxToolResponse)
 		results = append(results, result)
 	}
 
