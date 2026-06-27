@@ -36,12 +36,15 @@ func (a *App) Greet(name string) string {
 
 func (a *App) SendMsg(text string) string {
 	msg := a.Thread
+	msg.currentTurn++
+
 	msg.AppendMessage("user", "", text)
 	ansr, err := msg.SendMessage()
 	if err != nil {
 		fmt.Println(fmt.Errorf("error: %s", err))
 		return ""
 	}
+	msg.Compact()
 	return ansr.Message.Content
 }
 

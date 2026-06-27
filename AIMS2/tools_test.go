@@ -179,3 +179,85 @@ func TestStockCheckParseInventoryDataIncludesNoteWhenPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactDropsOldToolMessagesAndClearsOldAssistantToolCalls(t *testing.T) {
+	chat := &Chat{
+		currentTurn: 3,
+		Messages: []Messages{
+			{Role: "system", Content: "system prompt", turn: 0},
+			{Role: "user", Content: "old user", turn: 1},
+			{
+				Role:    "assistant",
+				Content: "",
+				ToolCalls: []ToolCall{
+					{ID: "old-tool-call"},
+				},
+				turn: 1,
+			},
+			{Role: "tool", ToolName: "stock_check", Content: `{"old":true}`, turn: 1},
+			{Role: "assistant", Content: "old final answer", turn: 1},
+			{Role: "user", Content: "current user", turn: 3},
+			{
+				Role:    "assistant",
+				Content: "",
+				ToolCalls: []ToolCall{
+					{ID: "current-tool-call"},
+				},
+				turn: 3,
+			},
+			{Role: "tool", ToolName: "stock_check", Content: `{"current":true}`, turn: 3},
+			{Role: "assistant", Content: "current final answer", turn: 3},
+			{Role: "user", Content: "filler one", turn: 2},
+			{Role: "assistant", Content: "filler two", turn: 2},
+		},
+	}
+
+	chat.Compact()
+
+	if len(chat.Messages) == 0 {
+		t.Fatalf("compact removed all messages")
+	}
+	if chat.Messages[0].Role != "system" || chat.Messages[0].Content != "system prompt" {
+		t.Fatalf("system prompt not preserved as first message: %+v", chat.Messages)
+	}
+
+	oldToolCount := 0
+	currentToolCount := 0
+	oldAssistantToolCalls := 0
+	currentAssistantToolCalls := 0
+	systemCount := 0
+
+	for _, msg := range chat.Messages {
+		if msg.Role == "system" {
+			systemCount++
+		}
+		if msg.Role == "tool" && msg.turn == 1 {
+			oldToolCount++
+		}
+		if msg.Role == "tool" && msg.turn == 3 {
+			currentToolCount++
+		}
+		if msg.Role == "assistant" && msg.turn == 1 && len(msg.ToolCalls) > 0 {
+			oldAssistantToolCalls++
+		}
+		if msg.Role == "assistant" && msg.turn == 3 && len(msg.ToolCalls) > 0 {
+			currentAssistantToolCalls++
+		}
+	}
+
+	if systemCount != 1 {
+		t.Fatalf("expected exactly one system prompt, got %d messages=%+v", systemCount, chat.Messages)
+	}
+	if oldToolCount != 0 {
+		t.Fatalf("expected old tool messages to be dropped, got %d messages=%+v", oldToolCount, chat.Messages)
+	}
+	if currentToolCount != 1 {
+		t.Fatalf("expected current tool message to be preserved, got %d messages=%+v", currentToolCount, chat.Messages)
+	}
+	if oldAssistantToolCalls != 0 {
+		t.Fatalf("expected old assistant tool calls to be cleared, got %d messages=%+v", oldAssistantToolCalls, chat.Messages)
+	}
+	if currentAssistantToolCalls != 1 {
+		t.Fatalf("expected current assistant tool call to be preserved, got %d messages=%+v", currentAssistantToolCalls, chat.Messages)
+	}
+}

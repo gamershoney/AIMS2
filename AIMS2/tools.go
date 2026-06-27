@@ -220,7 +220,7 @@ func (t *StockCheck) Name() string {
 }
 
 func (t *StockCheck) Description() string {
-	return "USE WHEN: finding whether the company carries an item or discovering its exact internal stock_number from a part number, vendor part number, description, or keyword. RETURNS: compact candidates with stock_number, description, on_hand, confidence_score, and match_type. NEXT: call item_details only for candidates needing full data. DO NOT USE: when an exact internal stock_number is already known and full details are requested."
+	return "USE WHEN: finding whether the company carries an item or discovering its exact internal stock_number from a part number, vendor part number, description, or keyword. RETURNS: compact candidates with stock_number, store_id, description, on_hand, note flags, confidence_score, and match_type. NEXT: if the user asks for price, cost, vendor, usage, dates, notes, or full details, call item_details with the best matching internal stock_number. DO NOT USE: when an exact internal stock_number is already known and full details are requested. READ-ONLY: this tool never changes inventory data."
 }
 
 func (t *StockCheck) Parameters() Parameters {
@@ -338,7 +338,7 @@ func (t *NotesTool) Name() string {
 }
 
 func (t *NotesTool) Description() string {
-	return "STATE-CHANGING TOOL. USE WHEN: the user explicitly asks to save or update an item note, critical flag, minimum_on_hand, or target_on_hand. REQUIRES: an exact internal stock_number. Use stock_check first if unknown; use item_details first when existing values must be reviewed. DO NOT USE: to read notes, inspect an item, or save an unconfirmed inference."
+	return "STATE-CHANGING TOOL. USE WHEN: the user explicitly asks to save or update an item note, critical flag, minimum_on_hand, or target_on_hand. REQUIRES: an exact internal stock_number. Use stock_check first if unknown; use item_details first when existing values must be reviewed. DO NOT USE: to read notes, inspect an item, look up price/cost, or save an unconfirmed inference. CONFIRMATION REQUIRED: do not call this tool unless the user clearly approved the change."
 }
 
 func (t *NotesTool) Parameters() Parameters {
@@ -445,7 +445,7 @@ func (t *ItemDetails) Name() string {
 }
 
 func (t *ItemDetails) Description() string {
-	return "USE WHEN: full company data is needed for one item whose exact internal stock_number is known. RETURNS: vendor, price, cost, on_hand, average usage, transaction dates, notes, and stocking settings. DO NOT USE: for keywords, descriptions, uncertain part numbers, or finding candidates; use stock_check first. READ-ONLY: this tool never changes inventory data."
+	return "USE WHEN: full company data is needed for one item whose exact internal stock_number is known, especially when the user asks for price, cost, vendor, usage, dates, notes, or stocking settings. RETURNS: vendor, price, cost, on_hand, average usage, transaction dates, notes, and stocking settings. DO NOT USE: for keywords, descriptions, uncertain part numbers, or finding candidates; use stock_check first, then retry item_details with the best matching stock_number. READ-ONLY: this tool never changes inventory data. Price and cost lookup is allowed when requested by the user and does not require confirmation."
 }
 
 func (t *ItemDetails) Parameters() Parameters {

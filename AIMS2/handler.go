@@ -24,17 +24,18 @@ type Messages struct {
 	Content   string     `json:"content,omitempty"`
 	ToolName  string     `json:"tool_name,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	turn      int
 }
 
 type Chat struct {
-	Messages  []Messages  `json:"messages"`
-	Model     string      `json:"model"`
-	Stream    bool        `json:"stream"`
-	KeepAlive string      `json:"keep_alive"`
-	Tools     []ModelTool `json:"tools,omitempty"`
-
-	registry *Registry
-	logger   *ConversationLogger
+	Messages    []Messages  `json:"messages"`
+	Model       string      `json:"model"`
+	Stream      bool        `json:"stream"`
+	KeepAlive   string      `json:"keep_alive"`
+	Tools       []ModelTool `json:"tools,omitempty"`
+	currentTurn int
+	registry    *Registry
+	logger      *ConversationLogger
 }
 
 type ToolCall struct {
@@ -219,6 +220,7 @@ func (m *Chat) AppendMessage(role string, toolname string, text string) {
 	msg := Messages{
 		Role:    role,
 		Content: text,
+		turn:    m.currentTurn,
 	}
 
 	if toolname != "" {
@@ -237,6 +239,7 @@ func (m *Chat) AppendAssistantMessage(ai AIMessage) {
 		Role:      "assistant",
 		Content:   ai.Content,
 		ToolCalls: ai.ToolCalls,
+		turn:      m.currentTurn,
 	})
 }
 

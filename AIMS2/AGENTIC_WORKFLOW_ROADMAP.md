@@ -101,6 +101,7 @@ Move filtering, calculations, sorting, and deduplication into deterministic Go c
 
 - [x] Separate general item search from exact item detail retrieval
 - [x] Improve tool descriptions so the model can choose tools more consistently
+- [x] Clarify that price and cost lookup is read-only and does not require confirmation
 - [x] Mark `make_note` as state-changing in its tool description
 - [ ] Implement `analyze_vendor_order`
 - [ ] Implement `build_reorder_candidates`
