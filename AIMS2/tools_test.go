@@ -4,6 +4,7 @@ import (
 	"AIMS2/importer"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,101 @@ func TestRunToolCalls(t *testing.T) {
 	testMsg := tool.Execute(context.TODO(), tc)
 	if testMsg.Error != nil {
 		t.Fatalf("stock check failed: %v", testMsg.Error)
+	}
+}
+
+func TestStockCheckExecuteReturnsWorkflowState(t *testing.T) {
+	tc := ToolCall{
+		ID: "testID", Function: struct {
+			Index     int64          "json:\"index\""
+			Name      string         "json:\"name\""
+			Arguments map[string]any "json:\"arguments\""
+		}{
+			Index:     1,
+			Name:      "stock_check",
+			Arguments: map[string]any{"query": "3M-16114"},
+		},
+	}
+
+	tool := &StockCheck{}
+	result := tool.Execute(context.TODO(), tc)
+	if result.Error != nil {
+		t.Fatalf("stock check failed: %v", result.Error)
+	}
+	if result.State == nil {
+		t.Fatalf("expected stock_check to return workflow state")
+	}
+	if result.State.LastToolUsed != "stock_check" {
+		t.Fatalf("expected last tool used to be stock_check, got %q", result.State.LastToolUsed)
+	}
+	if result.State.LastItemSearch != "3M-16114" {
+		t.Fatalf("expected last item search to be recorded, got %q", result.State.LastItemSearch)
+	}
+	if result.State.LastItemFound != "" {
+		t.Fatalf("stock_check should not set a confirmed last item found, got %q", result.State.LastItemFound)
+	}
+}
+
+func TestRunToolCallsAppliesWorkflowState(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(&StockCheck{})
+
+	chat := &Chat{
+		registry: registry,
+		Messages: []Messages{
+			{Role: "system", Content: "base system prompt"},
+			{Role: "system", Content: ""},
+		},
+	}
+
+	ai := AIMessage{
+		Role: "assistant",
+		ToolCalls: []ToolCall{
+			{
+				ID: "testID", Function: struct {
+					Index     int64          "json:\"index\""
+					Name      string         "json:\"name\""
+					Arguments map[string]any "json:\"arguments\""
+				}{
+					Index:     1,
+					Name:      "stock_check",
+					Arguments: map[string]any{"query": "3M-16114"},
+				},
+			},
+		},
+	}
+
+	results := chat.RunToolCalls(ai)
+	if len(results) != 1 {
+		t.Fatalf("expected one tool result, got %d", len(results))
+	}
+	if results[0].Error != nil {
+		t.Fatalf("stock check failed: %v", results[0].Error)
+	}
+	if chat.workflowState == nil {
+		t.Fatalf("expected RunToolCalls to apply workflow state to chat")
+	}
+	if chat.workflowState.LastToolUsed != "stock_check" {
+		t.Fatalf("expected last tool used to be stock_check, got %q", chat.workflowState.LastToolUsed)
+	}
+	if chat.workflowState.LastItemSearch != "3M-16114" {
+		t.Fatalf("expected last item search to be recorded, got %q", chat.workflowState.LastItemSearch)
+	}
+	if len(chat.Messages) < 2 {
+		t.Fatalf("expected workflow state message to be applied, got messages=%+v", chat.Messages)
+	}
+	stateMessage := chat.Messages[1]
+	if stateMessage.Role != "system" {
+		t.Fatalf("expected workflow state message to be system role, got %+v", stateMessage)
+	}
+	for _, want := range []string{
+		"Current Working State:",
+		`"last_tool_used": "stock_check"`,
+		`"last_item_searched": "3M-16114"`,
+	} {
+		if !strings.Contains(stateMessage.Content, want) {
+			t.Fatalf("workflow state message missing %q: %s", want, stateMessage.Content)
+		}
 	}
 }
 
@@ -259,5 +355,96 @@ func TestCompactDropsOldToolMessagesAndClearsOldAssistantToolCalls(t *testing.T)
 	}
 	if currentAssistantToolCalls != 1 {
 		t.Fatalf("expected current assistant tool call to be preserved, got %d messages=%+v", currentAssistantToolCalls, chat.Messages)
+	}
+}
+
+func TestApplyStateReplacesReservedSystemMessage(t *testing.T) {
+	state := &WorkflowState{
+		LastToolUsed:   "item_details",
+		LastItemSearch: "000068",
+		LastItemFound:  "ME-000068",
+	}
+	chat := &Chat{
+		Messages: []Messages{
+			{Role: "system", Content: "base system prompt"},
+			{Role: "system", Content: ""},
+			{Role: "user", Content: "How many do we have and what is our price?", turn: 1},
+		},
+	}
+
+	if err := chat.ApplyState(state); err != nil {
+		t.Fatalf("apply state: %v", err)
+	}
+
+	if len(chat.Messages) != 3 {
+		t.Fatalf("expected ApplyState to replace reserved state slot without changing message count, got %d messages=%+v", len(chat.Messages), chat.Messages)
+	}
+	if chat.Messages[0].Content != "base system prompt" {
+		t.Fatalf("base system prompt was not preserved: %+v", chat.Messages)
+	}
+
+	stateMsg := chat.Messages[1]
+	if stateMsg.Role != "system" {
+		t.Fatalf("expected workflow state message to remain a system message, got %+v", stateMsg)
+	}
+	for _, want := range []string{
+		"Current Working State:",
+		`"last_tool_used": "item_details"`,
+		`"last_item_searched": "000068"`,
+		`"last_item_found": "ME-000068"`,
+	} {
+		if !strings.Contains(stateMsg.Content, want) {
+			t.Fatalf("workflow state message missing %q: %s", want, stateMsg.Content)
+		}
+	}
+	if chat.Messages[2].Role != "user" || chat.Messages[2].Content == "" {
+		t.Fatalf("user message after reserved state slot was overwritten: %+v", chat.Messages)
+	}
+
+	firstStateContent := chat.Messages[1].Content
+	nextState := &WorkflowState{
+		LastToolUsed:   "stock_check",
+		LastItemSearch: "000068",
+		LastItemFound:  "ME-000068",
+	}
+	if err := chat.ApplyState(nextState); err != nil {
+		t.Fatalf("re-apply state: %v", err)
+	}
+
+	if len(chat.Messages) != 3 {
+		t.Fatalf("expected re-applying state not to duplicate messages, got %d messages=%+v", len(chat.Messages), chat.Messages)
+	}
+	if chat.Messages[1].Content == firstStateContent {
+		t.Fatalf("expected workflow state slot to be updated on re-apply")
+	}
+	if !strings.Contains(chat.Messages[1].Content, `"last_tool_used": "stock_check"`) {
+		t.Fatalf("workflow state slot was not updated: %s", chat.Messages[1].Content)
+	}
+}
+
+func TestApplyStateWithMissingReservedSlotDoesNotOverwriteUserMessage(t *testing.T) {
+	state := &WorkflowState{
+		LastToolUsed:  "item_details",
+		LastItemFound: "ME-000068",
+	}
+	chat := &Chat{
+		Messages: []Messages{
+			{Role: "system", Content: "base system prompt"},
+			{Role: "user", Content: "How many do we have and what is our price?", turn: 1},
+		},
+	}
+
+	if err := chat.ApplyState(state); err != nil {
+		t.Fatalf("apply state: %v", err)
+	}
+
+	userMessages := 0
+	for _, msg := range chat.Messages {
+		if msg.Role == "user" && msg.Content == "How many do we have and what is our price?" {
+			userMessages++
+		}
+	}
+	if userMessages != 1 {
+		t.Fatalf("expected ApplyState not to overwrite user message when reserved slot is missing, got %d messages=%+v", userMessages, chat.Messages)
 	}
 }

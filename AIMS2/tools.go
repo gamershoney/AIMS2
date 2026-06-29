@@ -1,7 +1,6 @@
 package main
 
 import (
-	"AIMS2/importer"
 	"bytes"
 	"context"
 	"database/sql"
@@ -12,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"AIMS2/importer"
 )
 
 const (
@@ -37,8 +38,8 @@ type Property struct {
 
 type Parameters struct {
 	Type       string              `json:"type"`
-	Properties map[string]Property `json:"properties"`
-	Required   []string            `json:"required"`
+	Properties map[string]Property `json:"properties,omitempty"`
+	Required   []string            `json:"required,omitempty"`
 }
 
 type Registry struct {
@@ -56,14 +57,15 @@ type ModelFunction struct {
 }
 
 type ModelTool struct {
-	Type     string
-	Function ModelFunction
+	Type     string        `json:"type,omitempty"`
+	Function ModelFunction `json:"function,omitempty"`
 }
 
 type ToolResult struct {
-	Name     string `json:"name"`
-	Response string `json:"response"`
-	Error    error  `json:"error"`
+	Name     string         `json:"name"`
+	Response string         `json:"response"`
+	Error    error          `json:"error"`
+	State    *WorkflowState `json:"current_state,omitempty"`
 }
 
 func (tr ToolResult) truncate(max int) string {
@@ -328,6 +330,12 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 
 	tr.Response = response
+	tr.State = &WorkflowState{
+		LastToolUsed:   tc.Function.Name,
+		LastItemSearch: qs,
+		LastItemFound:  "",
+		clear:          false,
+	}
 	return tr
 }
 
@@ -403,7 +411,11 @@ func (t *NotesTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	} else {
 		tr.Response = "Note saved"
 	}
-
+	tr.State = &WorkflowState{
+		LastToolUsed:   tc.Function.Name,
+		LastItemSearch: skustring,
+		clear:          true,
+	}
 	return tr
 }
 
@@ -425,17 +437,23 @@ func (t *PriorityVendor) Parameters() Parameters {
 
 func (t *PriorityVendor) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	results, err := importer.GetPriorityVendor()
-	tr := &ToolResult{Name: tc.Function.Name, Response: ""}
+	tr := ToolResult{Name: tc.Function.Name, Response: ""}
 	if err != nil {
 		tr.Error = errors.New("could not retrieve vendor data at this time")
 	}
 	b, err := json.MarshalIndent(results, "", "")
 	if err != nil {
 		tr.Error = errors.New("could not return inventory data due to database and tool calling error")
-		return *tr
+		return tr
 	}
 	tr.Response = string(b)
-	return *tr
+	tr.State = &WorkflowState{
+		LastToolUsed:   tc.Function.Name,
+		LastItemSearch: "searched for all priority vendors",
+		LastItemFound:  "",
+		clear:          false,
+	}
+	return tr
 }
 
 type ItemDetails struct{}
@@ -482,6 +500,11 @@ func (t *ItemDetails) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	if err != nil {
 		tr.Error = errors.New("could not parse returning inventory data")
 		return tr
+	}
+	tr.State = &WorkflowState{
+		LastItemFound:  result.Item.StockNumber,
+		LastItemSearch: sku,
+		LastToolUsed:   tc.Function.Name,
 	}
 	tr.Response = string(b)
 	return tr

@@ -28,14 +28,15 @@ type Messages struct {
 }
 
 type Chat struct {
-	Messages    []Messages  `json:"messages"`
-	Model       string      `json:"model"`
-	Stream      bool        `json:"stream"`
-	KeepAlive   string      `json:"keep_alive"`
-	Tools       []ModelTool `json:"tools,omitempty"`
-	currentTurn int
-	registry    *Registry
-	logger      *ConversationLogger
+	Messages      []Messages  `json:"messages"`
+	Model         string      `json:"model"`
+	Stream        bool        `json:"stream"`
+	KeepAlive     string      `json:"keep_alive"`
+	Tools         []ModelTool `json:"tools,omitempty"`
+	workflowState *WorkflowState
+	currentTurn   int
+	registry      *Registry
+	logger        *ConversationLogger
 }
 
 type ToolCall struct {
@@ -210,6 +211,14 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 	for range ai.ToolCalls {
 		result := <-ch
 		result.Response = result.truncate(maxToolResponse)
+		if result.State != nil {
+			m.workflowState = result.State
+			err := m.ApplyState(result.State)
+			if err != nil {
+				continue
+			}
+
+		}
 		results = append(results, result)
 	}
 
@@ -245,4 +254,5 @@ func (m *Chat) AppendAssistantMessage(ai AIMessage) {
 
 func (m *Chat) SetSystemMessage() {
 	m.AppendMessage("system", "", systemPrompt)
+	m.AppendMessage("system", "workflow_state", "")
 }
