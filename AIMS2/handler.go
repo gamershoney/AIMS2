@@ -122,6 +122,7 @@ func (m *Chat) sendOnce() (*Answer, error) {
 		return nil, err
 	}
 
+	fmt.Printf("MODEL REQUEST SIZE: bytes=%d messages=%d\n", len(b), len(m.Messages))
 	fmt.Println("MESSAGES SENT TO MODEL:")
 	fmt.Println(string(b))
 

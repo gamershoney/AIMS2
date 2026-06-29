@@ -39,6 +39,7 @@ func (a *App) SendMsg(text string) string {
 	msg.currentTurn++
 
 	msg.AppendMessage("user", "", text)
+	msg.Compact()
 	ansr, err := msg.SendMessage()
 	if err != nil {
 		fmt.Println(fmt.Errorf("error: %s", err))
