@@ -15,8 +15,11 @@ Build a reliable supervised agent that can complete deeper purchasing and invent
 - [x] Persistent inventory notes
 - [x] Vendor-priority analysis
 - [x] Conversation and tool logging
+- [x] Model request size diagnostics
 - [x] Test coverage for compact `stock_check` output
 - [x] More diagnostic logging in the compact-result test
+- [x] In-memory workflow state slot for recent tool context
+- [x] Context compaction for old raw tool messages
 - [x] Desktop chat interface
 - [x] Conversation log excluded from Git
 - [ ] Production config and secrets moved out of code
@@ -30,7 +33,7 @@ The project now has a usable tool foundation for supervised inventory assistance
 2. `item_details` retrieves full inventory data only after a specific `stock_number` is known.
 3. Tool descriptions now tell the model when to use each tool and when not to.
 
-The remaining gap is not basic tool calling. The remaining gap is workflow control: durable state, deterministic purchasing/reorder tools, bounded context, confirmation rules, and end-to-end evaluations.
+The remaining gap is not basic tool calling. The remaining gap is workflow control: durable cross-session state, deterministic purchasing/reorder tools, stronger bounded-context telemetry, confirmation rules enforced in code, and end-to-end evaluations.
 
 ## Milestone 1: Compact Tool Results
 
@@ -51,8 +54,8 @@ Reduce the amount of inventory data placed directly into model context.
 
 - A broad inventory query does not return an unbounded JSON payload. ✅
 - The model can select an item and request its full details. ✅
-- Important warnings and notes remain visible in summarized results.
-- All high-volume tools have explicit size limits.
+- Important warnings and notes remain visible in summarized results. ✅
+- All high-volume tools have explicit size limits. ✅
 
 ### Completed Details
 
@@ -123,16 +126,29 @@ Move filtering, calculations, sorting, and deduplication into deterministic Go c
 
 Store workflow progress outside the conversation history.
 
-- [ ] Define a `WorkflowState` structure
+- [x] Define a minimal `WorkflowState` structure
+- [x] Add a reserved system-message slot for current workflow state
+- [x] Update workflow state from tool results
+- [x] Apply workflow state during tool execution
 - [ ] Assign each workflow a stable ID
 - [ ] Track the workflow goal and current stage
 - [ ] Track selected inventory item IDs
 - [ ] Track decisions, assumptions, and warnings
-- [ ] Persist workflow state between model turns
-- [ ] Send only the current stage and relevant state to the model
+- [x] Persist workflow state between model turns in memory
+- [x] Send current relevant state to the model
 - [ ] Support resuming and cancelling workflows
 
-Suggested structure:
+Current minimal structure:
+
+```go
+type WorkflowState struct {
+    LastToolUsed   string `json:"last_tool_used,omitempty"`
+    LastItemSearch string `json:"last_item_searched,omitempty"`
+    LastItemFound  string `json:"last_item_found,omitempty"`
+}
+```
+
+Future fuller structure:
 
 ```go
 type WorkflowState struct {
@@ -147,9 +163,16 @@ type WorkflowState struct {
 
 ### Acceptance Criteria
 
-- A workflow can continue without replaying every previous tool result.
+- A workflow can continue without replaying every previous tool result. ✅
+- The most recent item/tool context is available without replaying raw tool payloads. ✅
 - The current stage and next valid actions are always identifiable.
 - A user can resume an interrupted workflow.
+
+### Completed Details
+
+Tool results can now return workflow state, and `RunToolCalls` applies that state into a reserved system message. This gives the model a compact working memory such as the last tool used, the last item searched, and the last confirmed item found.
+
+This is intentionally still a minimal state layer. It is not yet a full durable workflow engine: there are no stable workflow IDs, explicit stages, selected item ID lists, decision history, warning history, resume/cancel behavior, or cross-session persistence.
 
 ## Milestone 4: Skills and Procedures
 
@@ -200,7 +223,10 @@ This is the best first skill with the tools currently available because it can u
 - [ ] Return structured tool errors
 - [ ] Stop execution immediately after all unrecoverable tool errors
 - [ ] Execute dependent tool calls sequentially
-- [ ] Add conversation memory summarization and trim old raw tool messages from model context
+- [x] Trim old raw tool messages from model context
+- [x] Compact context before and after model responses once the turn threshold is reached
+- [x] Log model request byte size and message count
+- [ ] Add conversation memory summarization
 - [ ] Correctly reset backend state when starting a new chat
 - [ ] Require user confirmation before state-changing operations
 - [ ] Fix `make_note` numeric argument parsing from JSON `float64`
@@ -211,6 +237,7 @@ This is the best first skill with the tools currently available because it can u
 
 - Failed tools do not crash or corrupt the workflow.
 - A new chat resets both frontend and backend conversation state.
+- Old tool payloads are removed from model context after they are no longer part of the active turn. ✅
 - No inventory note or purchasing change occurs without the required approval.
 
 ## Milestone 6: Evaluation and Testing
@@ -218,6 +245,11 @@ This is the best first skill with the tools currently available because it can u
 - [x] Add assertions for compact `stock_check` response shape
 - [x] Add diagnostic test logging for compact `stock_check` output
 - [x] Test compact note warning fields in `stock_check`
+- [x] Test `stock_check` workflow-state output
+- [x] Test tool execution applies workflow state
+- [x] Test workflow-state system slot replacement
+- [x] Test missing workflow-state slot does not overwrite user messages
+- [x] Test compaction drops old tool messages and old assistant tool calls
 - [ ] Replace remaining print-only tests with assertions
 - [ ] Use isolated temporary databases in tests
 - [ ] Test compact result limits
