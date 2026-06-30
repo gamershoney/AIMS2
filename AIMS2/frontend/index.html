@@ -8,27 +8,37 @@
   <title>AIMS2</title>
 </head>
 
-<body class="">
-  <div id="app" class="bg-stone-800 h-full">
-    <div class="p-5 h-full flex flex-col">
-      <div class="border-b border-b-slate-600 flex w-full">
-        <p class="text-left p-2 text-2xl text-yellow-500">
-          AIMS2
-        </p>
+<body>
+  <div id="app" class="h-full">
+    <div class="app-shell p-5 h-full flex flex-col">
+      <div class="app-header border-b border-b-slate-600 flex w-full items-center">
+        <div class="brand-block text-left p-2">
+          <p class="brand-title text-2xl text-yellow-500">AIMS2</p>
+          <p class="brand-subtitle">Inventory assistant</p>
+        </div>
         <span class="flex-1"></span>
-        <button id="new-chat" class="text-white hover:cursor-pointer">
+        <button id="new-chat" class="text-white nav-button focus-ring" aria-label="Start a new chat">
           New Chat
         </button>
       </div>
-      <div id="msg-body" class="flex-1 p-2 **:mb-5 w-full overflow-y-scroll">
-
+      <div id="msg-body" class="chat-body flex-1 p-2 w-full overflow-y-scroll">
+        <section id="empty-state" class="empty-state">
+          <p class="empty-eyebrow">Ready when you are</p>
+          <h1>What should we investigate?</h1>
+          <p class="empty-copy">Ask about stock, cost, received dates, vendor priority, or online comparisons.</p>
+          <div class="prompt-grid" aria-label="Example prompts">
+            <button class="prompt-card focus-ring" type="button">Do we stock ME-000068?</button>
+            <button class="prompt-card focus-ring" type="button">What is our cost on WLM-WMK14T-35?</button>
+            <button class="prompt-card focus-ring" type="button">Which vendors need attention?</button>
+          </div>
+        </section>
 
       </div>
-      <div class="border rounded-2xl border-slate-400 text-slate-300 bg-stone-700 flex place-content-evenly p-2">
+      <div class="chat-input border rounded-2xl border-slate-400 text-slate-300 bg-stone-700 flex p-2">
         <span id="input-loader" class="loader hidden"></span>
-        <textarea id="textinput" class="inputbox outline-0 resize-none place-content-center-safe flex-1 pl-3"
-          type="text" placeholder="Ask anything..."></textarea>
-        <button id="sendBtn" class="inputbox hover:cursor-pointer">
+        <textarea id="textinput" class="inputbox outline-0 resize-none flex-1 pl-3"
+          placeholder="Ask anything..." aria-label="Message"></textarea>
+        <button id="sendBtn" class="inputbox send-button focus-ring" aria-label="Send message">
           Send
         </button>
       </div>
@@ -38,9 +48,15 @@
 
   <template id="message-entry">
 
-    <p class="msg-content text-white text-xl p-4 w-fit max-w-[75%]">
+    <div class="message-row">
+      <span class="message-meta">
+        <span class="message-label"></span>
+        <span class="message-time"></span>
+      </span>
+      <p class="msg-content text-white p-4 w-fit max-w-[75%]">
 
-    </p>
+      </p>
+    </div>
   </template>
   <script src="./src/main.js" type="module">
 

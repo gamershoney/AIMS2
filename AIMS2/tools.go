@@ -58,7 +58,7 @@ type ModelFunction struct {
 
 type ModelTool struct {
 	Type     string        `json:"type,omitempty"`
-	Function ModelFunction `json:"function,omitempty"`
+	Function ModelFunction `json:"function,omitzero"`
 }
 
 type ToolResult struct {
@@ -222,7 +222,7 @@ func (t *StockCheck) Name() string {
 }
 
 func (t *StockCheck) Description() string {
-	return "USE WHEN: finding whether the company carries an item or discovering its exact internal stock_number from a part number, vendor part number, description, or keyword. RETURNS: compact candidates with stock_number, store_id, description, on_hand, note flags, confidence_score, and match_type. NEXT: if the user asks for price, cost, vendor, usage, dates, notes, or full details, call item_details with the best matching internal stock_number. DO NOT USE: when an exact internal stock_number is already known and full details are requested. READ-ONLY: this tool never changes inventory data."
+	return "USE WHEN: finding whether the company carries an item or discovering its exact internal stock_number from a part number, vendor part number, description, or keyword. RETURNS ONLY: compact candidates with stock_number, store_id, description, on_hand, note flags, confidence_score, and match_type. DOES NOT RETURN: price, cost, vendor, usage, received dates, sales dates, or full notes. REQUIRED NEXT STEP: if the user asks for price, cost, retail, vendor, usage, dates, notes, or full details, call item_details with the best matching internal stock_number before answering. DO NOT USE: when an exact internal stock_number is already known and full details are requested. READ-ONLY: this tool never changes inventory data."
 }
 
 func (t *StockCheck) Parameters() Parameters {

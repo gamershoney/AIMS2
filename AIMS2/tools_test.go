@@ -448,3 +448,143 @@ func TestApplyStateWithMissingReservedSlotDoesNotOverwriteUserMessage(t *testing
 		t.Fatalf("expected ApplyState not to overwrite user message when reserved slot is missing, got %d messages=%+v", userMessages, chat.Messages)
 	}
 }
+
+func TestRunRequiredDetailFollowUpsFetchesDetailsForCostQuestion(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(fakeItemDetailsTool{})
+
+	chat := &Chat{
+		registry: registry,
+		Messages: []Messages{
+			{Role: "user", Content: "What is our cost on WLM-WMK14T-35?"},
+		},
+	}
+
+	results := []ToolResult{
+		{
+			Name: "stock_check",
+			Response: `{
+				"count": 1,
+				"results": [
+					{
+						"stock_number": "WLM-WMK14T-35",
+						"store_id": 1,
+						"description": "CONTACT TIP .035 TAPER",
+						"on_hand": 190,
+						"confidence_score": 580,
+						"match_type": "Exact Stock Number",
+						"has_note": true
+					}
+				]
+			}`,
+		},
+	}
+
+	followUps := chat.RunRequiredDetailFollowUps(results)
+	if len(followUps) != 1 {
+		t.Fatalf("expected one required item_details follow-up, got %d", len(followUps))
+	}
+	if followUps[0].Name != "item_details" {
+		t.Fatalf("expected item_details follow-up, got %+v", followUps[0])
+	}
+	if !strings.Contains(followUps[0].Response, `"Cost":0.6588`) {
+		t.Fatalf("expected detail response with cost, got %s", followUps[0].Response)
+	}
+	if chat.workflowState == nil || chat.workflowState.LastItemFound != "WLM-WMK14T-35" {
+		t.Fatalf("expected item_details follow-up to apply workflow state, got %+v", chat.workflowState)
+	}
+}
+
+func TestRunRequiredDetailFollowUpsSkipsAvailabilityOnlyQuestion(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(fakeItemDetailsTool{})
+
+	chat := &Chat{
+		registry: registry,
+		Messages: []Messages{
+			{Role: "user", Content: "Do we stock WLM-WMK14T-35?"},
+		},
+	}
+
+	results := []ToolResult{
+		{
+			Name: "stock_check",
+			Response: `{
+				"count": 1,
+				"results": [
+					{
+						"stock_number": "WLM-WMK14T-35",
+						"store_id": 1,
+						"description": "CONTACT TIP .035 TAPER",
+						"on_hand": 190,
+						"confidence_score": 580,
+						"match_type": "Exact Stock Number",
+						"has_note": false
+					}
+				]
+			}`,
+		},
+	}
+
+	followUps := chat.RunRequiredDetailFollowUps(results)
+	if len(followUps) != 0 {
+		t.Fatalf("expected no detail follow-up for availability-only question, got %+v", followUps)
+	}
+}
+
+func TestRunRequiredDetailFollowUpsSkipsAmbiguousStockCheckResults(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(fakeItemDetailsTool{})
+
+	chat := &Chat{
+		registry: registry,
+		Messages: []Messages{
+			{Role: "user", Content: "What is our cost on 14T-35?"},
+		},
+	}
+
+	results := []ToolResult{
+		{
+			Name: "stock_check",
+			Response: `{
+				"count": 2,
+				"results": [
+					{"stock_number": "WLM-WMK14T-35", "store_id": 1, "description": "CONTACT TIP .035 TAPER", "on_hand": 190, "confidence_score": 280, "match_type": "Weak", "has_note": false},
+					{"stock_number": "WLM-WMK14T-35-5", "store_id": 1, "description": "CONTACT TIP .035 TAPERED", "on_hand": 10, "confidence_score": 280, "match_type": "Weak", "has_note": false}
+				]
+			}`,
+		},
+	}
+
+	followUps := chat.RunRequiredDetailFollowUps(results)
+	if len(followUps) != 0 {
+		t.Fatalf("expected no automatic detail follow-up for ambiguous candidates, got %+v", followUps)
+	}
+}
+
+type fakeItemDetailsTool struct{}
+
+func (fakeItemDetailsTool) Name() string {
+	return "item_details"
+}
+
+func (fakeItemDetailsTool) Description() string {
+	return "fake item details"
+}
+
+func (fakeItemDetailsTool) Parameters() Parameters {
+	return Parameters{Type: "object"}
+}
+
+func (fakeItemDetailsTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	sku, _ := tc.Function.Arguments["stock_number"].(string)
+	return ToolResult{
+		Name:     "item_details",
+		Response: `{"item":{"stock_number":"` + sku + `","Cost":0.6588,"Price":1.88}}`,
+		State: &WorkflowState{
+			LastToolUsed:   "item_details",
+			LastItemSearch: sku,
+			LastItemFound:  sku,
+		},
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -16,7 +17,7 @@ const (
 	gemmaModel   = "gemma4:12b"
 	defKeepAlive = "5m"
 
-	systemPrompt = "You are a purchasing/sales assistant for a welding distributor. Your users will only be outside salespeople and purchasing managers. Frame all of your responses for that demographic. It is important that responses are not given with emojis and are styled professionally."
+	systemPrompt = "You are a purchasing/sales assistant for a welding distributor. Your users will only be outside salespeople and purchasing managers. Frame all of your responses for that demographic. It is important that responses are not given with emojis and are styled professionally. Never answer price, cost, vendor, usage, received dates, sales dates, notes, or full item details from stock_check alone. stock_check is only for candidate discovery and availability. Use item_details for commercial or transaction fields before answering those questions."
 )
 
 type Messages struct {
@@ -95,6 +96,7 @@ func (m *Chat) SendMessage() (*Answer, error) {
 
 		// Run tools, append tool results, then loop back and ask the model again.
 		toolResults := m.RunToolCalls(ansr.Message)
+		toolResults = append(toolResults, m.RunRequiredDetailFollowUps(toolResults)...)
 
 		for _, tr := range toolResults {
 			if tr.Error != nil {
@@ -224,6 +226,127 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 	}
 
 	return results
+}
+
+func (m *Chat) RunRequiredDetailFollowUps(results []ToolResult) []ToolResult {
+	if !asksForItemDetails(m.lastUserMessage()) {
+		return nil
+	}
+	if toolResultsInclude(results, "item_details") {
+		return nil
+	}
+
+	stockNumber := exactSingleStockCheckResult(results)
+	if stockNumber == "" {
+		return nil
+	}
+
+	return []ToolResult{m.runToolByName("item_details", map[string]any{
+		"stock_number": stockNumber,
+	})}
+}
+
+func (m *Chat) runToolByName(name string, args map[string]any) ToolResult {
+	if m.registry == nil || m.registry.tools == nil {
+		return ToolResult{Name: name, Error: errors.New("tool registry is not initialized")}
+	}
+
+	tool, ok := m.registry.tools[name]
+	if !ok {
+		return ToolResult{Name: name, Error: fmt.Errorf("tool not found: %s", name)}
+	}
+
+	if m.logger != nil {
+		_ = m.logger.LogToolCall(name, args)
+	}
+
+	tc := ToolCall{}
+	tc.Function.Name = name
+	tc.Function.Arguments = args
+
+	result := tool.Execute(context.TODO(), tc)
+	if result.Name == "" {
+		result.Name = name
+	}
+	result.Response = result.truncate(maxToolResponse)
+
+	if result.State != nil {
+		if err := m.ApplyState(result.State); err != nil && m.logger != nil {
+			_ = m.logger.LogError("workflow_state", err.Error())
+		}
+	}
+
+	if m.logger != nil {
+		_ = m.logger.LogToolResult(result.Name, result.Response, result.Error)
+	}
+
+	return result
+}
+
+func (m *Chat) lastUserMessage() string {
+	for i := len(m.Messages) - 1; i >= 0; i-- {
+		if m.Messages[i].Role == "user" {
+			return m.Messages[i].Content
+		}
+	}
+	return ""
+}
+
+func asksForItemDetails(text string) bool {
+	text = strings.ToLower(text)
+	terms := []string{
+		"cost",
+		"price",
+		"retail",
+		"selling price",
+		"sell price",
+		"vendor",
+		"usage",
+		"received",
+		"receive",
+		"last sale",
+		"last shipment",
+		"shipment",
+		"note",
+		"minimum",
+		"target",
+		"stocking",
+		"full detail",
+		"details",
+	}
+	for _, term := range terms {
+		if strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolResultsInclude(results []ToolResult, name string) bool {
+	for _, result := range results {
+		if result.Name == name && result.Error == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func exactSingleStockCheckResult(results []ToolResult) string {
+	for _, result := range results {
+		if result.Name != "stock_check" || result.Error != nil {
+			continue
+		}
+
+		var response StockCheckResponse
+		if err := json.Unmarshal([]byte(result.Response), &response); err != nil {
+			continue
+		}
+		if response.Count != 1 || len(response.Results) != 1 {
+			continue
+		}
+		return response.Results[0].StockNumber
+	}
+	return ""
 }
 
 func (m *Chat) AppendMessage(role string, toolname string, text string) {
