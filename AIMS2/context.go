@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 )
@@ -78,4 +79,36 @@ func (m *Chat) ApplyState(wf *WorkflowState) error {
 		m.Messages = slices.Insert(m.Messages, 1, msg)
 	}
 	return nil
+}
+
+type ToolPermission string
+
+const (
+	PermissionNone     ToolPermission = "none"
+	PermissionRequired ToolPermission = "required"
+)
+
+type SkillTool interface {
+	Name() string
+	Description() string
+	Parameters() Parameters
+	Execute(ctx context.Context, tc ToolCall) ToolResult
+	Permission() ToolPermission
+}
+
+type SkillState struct {
+	JobID         string         `json:"job_id"`
+	SkillName     string         `json:"skill_name"`
+	StateName     string         `json:"state_name"`
+	EnteredReason string         `json:"entered_reason"`
+	Status        string         `json:"status"`
+	Summary       string         `json:"summary,omitempty"`
+	Data          map[string]any `json:"data,omitempty"`
+	Warnings      []string       `json:"warnings,omitempty"`
+}
+
+type SkillSession struct {
+	State        SkillState
+	Chat         *Chat
+	AllowedTools map[string]Tool
 }

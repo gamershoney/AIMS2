@@ -62,10 +62,11 @@ type ModelTool struct {
 }
 
 type ToolResult struct {
-	Name     string         `json:"name"`
-	Response string         `json:"response"`
-	Error    error          `json:"error"`
-	State    *WorkflowState `json:"current_state,omitempty"`
+	Name       string         `json:"name"`
+	Response   string         `json:"response"`
+	Error      error          `json:"error"`
+	State      *WorkflowState `json:"current_state,omitempty"`
+	SkillState *SkillState    `json:"skill_state,omitempty"`
 }
 
 func (tr ToolResult) truncate(max int) string {
@@ -508,4 +509,29 @@ func (t *ItemDetails) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 	tr.Response = string(b)
 	return tr
+}
+
+type SelectSkill struct{}
+
+func (t *SelectSkill) Name() string {
+	return "select_skill"
+}
+
+func (t *SelectSkill) Description() string {
+	return "Use this to select a skill from the skill catalog in the system prompt. You will need to enter the skill name and reason for using the skill in the parameters for calling this tool."
+}
+
+func (t *SelectSkill) Parameters() Parameters {
+	return Parameters{
+		Type: "object",
+		Properties: map[string]Property{
+			"skill_name":     {Type: "string", Description: "the name of the skill you want to call."},
+			"entered_reason": {Type: "string", Description: "the reason this skill is necessary."},
+		},
+		Required: []string{"skill_name", "entered_reason"},
+	}
+}
+
+func (t *SelectSkill) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	return ToolResult{}
 }
