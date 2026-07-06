@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"slices"
 )
 
@@ -111,4 +112,44 @@ type SkillSession struct {
 	State        SkillState
 	Chat         *Chat
 	AllowedTools map[string]Tool
+}
+
+type SkillRegistry struct {
+	Registry map[string]SkillTool
+}
+
+func NewSkillRegistry() *SkillRegistry {
+	reg := make(map[string]SkillTool)
+	return &SkillRegistry{Registry: reg}
+}
+
+type Skill struct {
+	Name            string
+	Description     string
+	AllowedTools    []string
+	RestrictedTools []string
+	MaxSteps        int
+}
+
+func ParseSkill(path string)
+
+func (sr *SkillRegistry) ParseSkills(dir string) error {
+	fldr, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, item := range fldr {
+		if item.IsDir() {
+			skillpath := item.Name() + "SKILL.md"
+			if err != nil {
+				return err
+			}
+
+		} else {
+			continue
+		}
+	}
+}
+
+func (sr *SkillRegistry) RegisterSkill() {
 }

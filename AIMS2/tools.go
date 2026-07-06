@@ -511,7 +511,9 @@ func (t *ItemDetails) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	return tr
 }
 
-type SelectSkill struct{}
+type SelectSkill struct {
+	Registry *SkillRegistry
+}
 
 func (t *SelectSkill) Name() string {
 	return "select_skill"
