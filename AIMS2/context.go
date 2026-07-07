@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	yaml "gopkg.in/yaml.v3"
 )
@@ -145,6 +148,26 @@ func ReadSkill(path string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
+	md := string(file)
+
+	md = strings.TrimPrefix(md, "\ufeff")
+
+	if strings.Count(md, "---\n") != 2 {
+		return nil, errors.New("error malformed line breaks in skill")
+	}
+	split := strings.SplitAfter(md, "---\n")
+	if len(split) < 2 {
+		return nil, errors.New("error: could not parse yaml")
+	}
+	md = split[len(split)-1]
+
+	if md == "" {
+		return nil, errors.New("error: empty frontmatter")
+	}
+	fmt.Println(md)
+	skill.Body = md
+	skill.Path = path
+	fmt.Println("Read skill: ", skill.Name)
 	return skill, err
 }
 
@@ -158,7 +181,7 @@ func (sr *SkillRegistry) ParseSkills(dir string) error {
 			skillpath := dir + "/" + item.Name() + "/" + "SKILL.md"
 			skill, err := ReadSkill(skillpath)
 			if err != nil {
-				continue
+				return err
 			}
 			sr.RegisterSkill(skill)
 		}
