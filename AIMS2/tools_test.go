@@ -4,6 +4,8 @@ import (
 	"AIMS2/importer"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -559,6 +561,58 @@ func TestRunRequiredDetailFollowUpsSkipsAmbiguousStockCheckResults(t *testing.T)
 	followUps := chat.RunRequiredDetailFollowUps(results)
 	if len(followUps) != 0 {
 		t.Fatalf("expected no automatic detail follow-up for ambiguous candidates, got %+v", followUps)
+	}
+}
+
+func TestParseSkillsRegistersSkillMetadata(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "build-order")
+	if err := os.Mkdir(skillDir, 0o755); err != nil {
+		t.Fatalf("create skill dir: %v", err)
+	}
+
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	content := []byte(`---
+name: build-order
+description: Build a reviewable order draft.
+allowed_tools:
+  - stock_check
+  - item_details
+requires_approval_for:
+  - make_note
+max_steps: 6
+---
+# Build Order Draft
+
+Use this skill when the user wants to build an order.
+`)
+	if err := os.WriteFile(skillFile, content, 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+
+	registry := NewSkillRegistry()
+	if err := registry.ParseSkills(dir); err != nil {
+		t.Fatalf("parse skills: %v", err)
+	}
+
+	skill, ok := registry.Registry["build-order"]
+	if !ok {
+		t.Fatalf("expected build-order skill to be registered, got registry=%+v", registry.Registry)
+	}
+	if skill.Name != "build-order" {
+		t.Fatalf("unexpected skill name: %q", skill.Name)
+	}
+	if skill.Description != "Build a reviewable order draft." {
+		t.Fatalf("unexpected description: %q", skill.Description)
+	}
+	if skill.MaxSteps != 6 {
+		t.Fatalf("unexpected max_steps: %d", skill.MaxSteps)
+	}
+	if len(skill.AllowedTools) != 2 || skill.AllowedTools[0] != "stock_check" || skill.AllowedTools[1] != "item_details" {
+		t.Fatalf("unexpected allowed tools: %+v", skill.AllowedTools)
+	}
+	if len(skill.RestrictedTools) != 1 || skill.RestrictedTools[0] != "make_note" {
+		t.Fatalf("unexpected restricted tools: %+v", skill.RestrictedTools)
 	}
 }
 

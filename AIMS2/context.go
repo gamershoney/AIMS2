@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
 const (
@@ -115,23 +117,36 @@ type SkillSession struct {
 }
 
 type SkillRegistry struct {
-	Registry map[string]SkillTool
+	Registry map[string]*Skill
 }
 
 func NewSkillRegistry() *SkillRegistry {
-	reg := make(map[string]SkillTool)
+	reg := make(map[string]*Skill)
 	return &SkillRegistry{Registry: reg}
 }
 
 type Skill struct {
-	Name            string
-	Description     string
-	AllowedTools    []string
-	RestrictedTools []string
-	MaxSteps        int
+	Name            string   `yaml:"name"`
+	Description     string   `yaml:"description"`
+	AllowedTools    []string `yaml:"allowed_tools"`
+	RestrictedTools []string `yaml:"requires_approval_for"`
+	MaxSteps        int      `yaml:"max_steps"`
+	Body            string
+	Path            string
 }
 
-func ParseSkill(path string)
+func ReadSkill(path string) (*Skill, error) {
+	file, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	skill := &Skill{}
+	err = yaml.Unmarshal(file, skill)
+	if err != nil {
+		return nil, err
+	}
+	return skill, err
+}
 
 func (sr *SkillRegistry) ParseSkills(dir string) error {
 	fldr, err := os.ReadDir(dir)
@@ -140,16 +155,17 @@ func (sr *SkillRegistry) ParseSkills(dir string) error {
 	}
 	for _, item := range fldr {
 		if item.IsDir() {
-			skillpath := item.Name() + "SKILL.md"
+			skillpath := dir + "/" + item.Name() + "/" + "SKILL.md"
+			skill, err := ReadSkill(skillpath)
 			if err != nil {
-				return err
+				continue
 			}
-
-		} else {
-			continue
+			sr.RegisterSkill(skill)
 		}
 	}
+	return err
 }
 
-func (sr *SkillRegistry) RegisterSkill() {
+func (sr *SkillRegistry) RegisterSkill(skill *Skill) {
+	sr.Registry[skill.Name] = skill
 }
