@@ -1,13 +1,14 @@
 package main
 
 import (
-	"AIMS2/importer"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"AIMS2/importer"
 )
 
 func TestRunToolCalls(t *testing.T) {
@@ -157,7 +158,8 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &response); err != nil {
 		t.Fatalf("unmarshal compact response: %v", err)
 	}
-	t.Logf("decoded response: count=%d results=%d message=%q",
+	t.Logf(
+		"decoded response: count=%d results=%d message=%q",
 		response.Count,
 		len(response.Results),
 		response.Message,
@@ -590,7 +592,7 @@ Use this skill when the user wants to build an order.
 		t.Fatalf("write skill file: %v", err)
 	}
 
-	registry := NewSkillRegistry()
+	registry := NewSkillRegistry(nil)
 	if err := registry.ParseSkills(dir); err != nil {
 		t.Fatalf("parse skills: %v", err)
 	}
@@ -613,6 +615,46 @@ Use this skill when the user wants to build an order.
 	}
 	if len(skill.RestrictedTools) != 1 || skill.RestrictedTools[0] != "make_note" {
 		t.Fatalf("unexpected restricted tools: %+v", skill.RestrictedTools)
+	}
+	if skill.Path != skillFile {
+		t.Fatalf("expected skill path %q, got %q", skillFile, skill.Path)
+	}
+	for _, want := range []string{
+		"# Build Order Draft",
+		"Use this skill when the user wants to build an order.",
+	} {
+		if !strings.Contains(skill.Body, want) {
+			t.Fatalf("expected skill body to contain %q, got %q", want, skill.Body)
+		}
+	}
+}
+
+func TestNewSkillRegistryIndexesSkillTools(t *testing.T) {
+	registry := NewSkillRegistry([]Tool{
+		fakeSkillTool{name: "approval_tool", permission: PermissionRequired},
+		fakeSkillTool{name: "readonly_tool", permission: PermissionNone},
+		fakeItemDetailsTool{},
+	})
+
+	if len(registry.Registry) != 0 {
+		t.Fatalf("expected empty skill metadata registry before ParseSkills, got %+v", registry.Registry)
+	}
+	required, ok := registry.Tools["approval_tool"]
+	if !ok {
+		t.Fatalf("expected approval_tool to be indexed, got %+v", registry.Tools)
+	}
+	if required.Permission() != PermissionRequired {
+		t.Fatalf("expected approval_tool permission required, got %q", required.Permission())
+	}
+	readOnly, ok := registry.Tools["readonly_tool"]
+	if !ok {
+		t.Fatalf("expected readonly_tool to be indexed, got %+v", registry.Tools)
+	}
+	if readOnly.Permission() != PermissionNone {
+		t.Fatalf("expected readonly_tool permission none, got %q", readOnly.Permission())
+	}
+	if _, exists := registry.Tools["item_details"]; exists {
+		t.Fatalf("expected non-SkillTool item_details to be ignored, got %+v", registry.Tools)
 	}
 }
 
@@ -641,4 +683,29 @@ func (fakeItemDetailsTool) Execute(ctx context.Context, tc ToolCall) ToolResult 
 			LastItemFound:  sku,
 		},
 	}
+}
+
+type fakeSkillTool struct {
+	name       string
+	permission ToolPermission
+}
+
+func (t fakeSkillTool) Name() string {
+	return t.name
+}
+
+func (t fakeSkillTool) Description() string {
+	return "fake skill tool"
+}
+
+func (t fakeSkillTool) Parameters() Parameters {
+	return Parameters{Type: "object"}
+}
+
+func (t fakeSkillTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	return ToolResult{Name: t.name, Response: "{}"}
+}
+
+func (t fakeSkillTool) Permission() ToolPermission {
+	return t.permission
 }

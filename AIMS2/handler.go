@@ -37,6 +37,7 @@ type Chat struct {
 	workflowState *WorkflowState
 	currentTurn   int
 	registry      *Registry
+	skillregistry *SkillRegistry
 	logger        *ConversationLogger
 }
 

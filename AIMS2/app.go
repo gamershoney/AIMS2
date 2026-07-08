@@ -17,6 +17,9 @@ func NewApp() *App {
 	logger := NewConversationLogger("")
 	newChat := &Chat{Model: gemmaModel, KeepAlive: defKeepAlive, Stream: false, logger: logger}
 	Reg := InitializeTools()
+
+	newChat.skillregistry = NewSkillRegistry(Reg.AllTools())
+
 	newChat.Tools = Reg.ModelTools()
 	newChat.registry = Reg
 	newChat.SetSystemMessage()

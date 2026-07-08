@@ -121,11 +121,24 @@ type SkillSession struct {
 
 type SkillRegistry struct {
 	Registry map[string]*Skill
+	Tools    map[string]SkillTool
 }
 
-func NewSkillRegistry() *SkillRegistry {
+func NewSkillRegistry(stools []Tool) *SkillRegistry {
+	var sktools []SkillTool
+	for _, v := range stools {
+		item, ok := v.(SkillTool)
+		if ok {
+			sktools = append(sktools, item)
+		}
+	}
+
 	reg := make(map[string]*Skill)
-	return &SkillRegistry{Registry: reg}
+	tools := make(map[string]SkillTool)
+	for _, v := range sktools {
+		tools[v.Name()] = v
+	}
+	return &SkillRegistry{Registry: reg, Tools: tools}
 }
 
 type Skill struct {

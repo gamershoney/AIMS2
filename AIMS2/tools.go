@@ -46,6 +46,14 @@ type Registry struct {
 	tools map[string]Tool
 }
 
+func (r *Registry) AllTools() []Tool {
+	var ta []Tool
+	for _, v := range r.tools {
+		ta = append(ta, v)
+	}
+	return ta
+}
+
 func (r *Registry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
 }
