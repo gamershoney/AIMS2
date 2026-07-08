@@ -205,3 +205,6 @@ func (sr *SkillRegistry) ParseSkills(dir string) error {
 func (sr *SkillRegistry) RegisterSkill(skill *Skill) {
 	sr.Registry[skill.Name] = skill
 }
+
+func (sr *SkillRegistry) MakeCatalog() {
+}
