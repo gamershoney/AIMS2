@@ -149,16 +149,20 @@ func CreateSession(skill *Skill, tools ToolMap, reason string) *SkillSession {
 }
 
 func newSkillChat(skill *Skill, allowedTools ToolMap, state *SkillState) *Chat {
+	config := LoadConfig()
 	registry := registryFromToolMap(allowedTools)
 	registry.Register(&UpdateSkillState{State: state})
 	registry.Register(&CompleteSkill{State: state})
 	chat := &Chat{
-		Model:      gemmaModel,
-		KeepAlive:  defKeepAlive,
-		Stream:     false,
-		registry:   registry,
-		Tools:      registry.ModelTools(),
-		skillState: state,
+		Model:         config.Model,
+		KeepAlive:     config.KeepAlive,
+		Stream:        false,
+		APIURL:        config.ModelAPIURL,
+		HTTPClient:    config.httpClient(),
+		DebugPayloads: config.DebugModelPayloads,
+		registry:      registry,
+		Tools:         registry.ModelTools(),
+		skillState:    state,
 	}
 	chat.Messages = []Messages{
 		{

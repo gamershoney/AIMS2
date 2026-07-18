@@ -3,7 +3,9 @@ package importer
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -62,17 +64,22 @@ func getCell(row []string, indexes map[string]int, item string) string {
 }
 
 func loadSheet(location string) ([]*InventoryItem, error) {
-	//l := location
-	f, err := excelize.OpenFile("Inv Master UPC USQL 20251119.xlsx")
+	if strings.TrimSpace(location) == "" {
+		location = strings.TrimSpace(os.Getenv("AIMS2_INVENTORY_IMPORT_PATH"))
+	}
+	if location == "" {
+		return nil, fmt.Errorf("inventory import path is required")
+	}
+	f, err := excelize.OpenFile(location)
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
 		err := f.Close()
 		if err != nil {
 			fmt.Println(err)
 		}
 	}()
-	if err != nil {
-		return nil, err
-	}
 	sheet := f.GetSheetName(0)
 	if sheet == "" {
 		return nil, fmt.Errorf("error: no sheet at index")

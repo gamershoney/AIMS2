@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
+	"strings"
 )
 
 type Note struct {
@@ -270,8 +272,14 @@ func GetPriorityVendor() ([]*VendorCount, error) {
 	critical = append(critical, high...)
 
 	vendors := make(map[string]int)
+	excludedVendors := make(map[string]struct{})
+	for _, vendor := range strings.Split(os.Getenv("AIMS2_EXCLUDED_VENDOR_CODES"), ",") {
+		if vendor = strings.ToUpper(strings.TrimSpace(vendor)); vendor != "" {
+			excludedVendors[vendor] = struct{}{}
+		}
+	}
 	for _, v := range critical {
-		if v.VendorNumber == "TBS" || v.VendorNumber == "GAS" || v.VendorNumber == "GLOC" || v.VendorNumber == "COC" {
+		if _, excluded := excludedVendors[strings.ToUpper(strings.TrimSpace(v.VendorNumber))]; excluded {
 			continue
 		}
 		vendors[v.VendorNumber] += 1

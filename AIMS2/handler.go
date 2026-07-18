@@ -12,10 +12,8 @@ import (
 )
 
 const (
-	apiUrl       = "http://216.119.200.67:8080/api/"
-	defMdoel     = "qwen3.5:9b"
-	gemmaModel   = "gemma4:12b"
-	defKeepAlive = "5m"
+	gemmaModel   = defaultModel
+	defKeepAlive = defaultKeepAlive
 
 	systemPrompt = "You are a purchasing/sales assistant for a welding distributor. Your users will only be outside salespeople and purchasing managers. Frame all of your responses for that demographic. It is important that responses are not given with emojis and are styled professionally. Never answer price, cost, vendor, usage, received dates, sales dates, notes, or full item details from stock_check alone. stock_check is only for candidate discovery and availability. Use item_details for commercial or transaction fields before answering those questions."
 )
@@ -29,11 +27,14 @@ type Messages struct {
 }
 
 type Chat struct {
-	Messages      []Messages  `json:"messages"`
-	Model         string      `json:"model"`
-	Stream        bool        `json:"stream"`
-	KeepAlive     string      `json:"keep_alive"`
-	Tools         []ModelTool `json:"tools,omitempty"`
+	Messages      []Messages   `json:"messages"`
+	Model         string       `json:"model"`
+	Stream        bool         `json:"stream"`
+	KeepAlive     string       `json:"keep_alive"`
+	Tools         []ModelTool  `json:"tools,omitempty"`
+	APIURL        string       `json:"-"`
+	HTTPClient    *http.Client `json:"-"`
+	DebugPayloads bool         `json:"-"`
 	workflowState *WorkflowState
 	skillState    *SkillState
 	currentTurn   int
@@ -153,16 +154,31 @@ func (m *Chat) sendOnce() (*Answer, error) {
 	}
 
 	fmt.Printf("MODEL REQUEST SIZE: bytes=%d messages=%d\n", len(b), len(m.Messages))
-	fmt.Println("MESSAGES SENT TO MODEL:")
-	fmt.Println(string(b))
+	if m.DebugPayloads {
+		fmt.Println("MESSAGES SENT TO MODEL:")
+		fmt.Println(string(b))
+	}
 
 	if m.logger != nil {
 		_ = m.logger.LogAPIRequest(m.Model)
 	}
 
 	br := bytes.NewReader(b)
+	apiURL := m.APIURL
+	if apiURL == "" {
+		apiURL = defaultModelAPIURL
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, normalizeBaseURL(apiURL)+"chat", br)
+	if err != nil {
+		return nil, fmt.Errorf("create model request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := m.HTTPClient
+	if client == nil {
+		client = (&Config{}).httpClient()
+	}
 
-	resp, err := http.Post(apiUrl+"chat", "application/json", br)
+	resp, err := client.Do(req)
 	if err != nil {
 		if m.logger != nil {
 			_ = m.logger.LogError("api_request", err.Error())
@@ -184,8 +200,10 @@ func (m *Chat) sendOnce() (*Answer, error) {
 		return nil, fmt.Errorf("%s", errMsg)
 	}
 
-	fmt.Println(string(body))
-	fmt.Println("")
+	if m.DebugPayloads {
+		fmt.Println(string(body))
+		fmt.Println("")
+	}
 
 	ansr := &Answer{}
 

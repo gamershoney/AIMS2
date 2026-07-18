@@ -10,6 +10,7 @@ type App struct {
 	ctx          context.Context
 	Thread       *Chat
 	ToolRegistry *Registry
+	config       Config
 }
 
 // PermissionRequest is the frontend-safe description of a tool call that is
@@ -24,9 +25,9 @@ type PermissionRequest struct {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	logger := NewConversationLogger("")
-	newChat := &Chat{Model: gemmaModel, KeepAlive: defKeepAlive, Stream: false, logger: logger}
-	Reg := InitializeTools()
+	config := LoadConfig()
+	newChat := newChatFromConfig(config)
+	Reg := InitializeTools(config)
 
 	newChat.skillregistry = NewSkillRegistry(Reg.AllTools())
 	if err := newChat.skillregistry.ParseSkills("./skills"); err != nil {
@@ -36,7 +37,19 @@ func NewApp() *App {
 	newChat.Tools = Reg.ModelTools()
 	newChat.registry = Reg
 	newChat.SetSystemMessage()
-	return &App{Thread: newChat, ToolRegistry: Reg}
+	return &App{Thread: newChat, ToolRegistry: Reg, config: config}
+}
+
+func newChatFromConfig(config Config) *Chat {
+	return &Chat{
+		Model:         config.Model,
+		KeepAlive:     config.KeepAlive,
+		Stream:        false,
+		APIURL:        config.ModelAPIURL,
+		HTTPClient:    config.httpClient(),
+		DebugPayloads: config.DebugModelPayloads,
+		logger:        config.conversationLogger(),
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -158,14 +171,13 @@ func (a *App) ClearChat() {
 		skillRegistry = a.Thread.skillregistry
 	}
 
-	a.Thread = &Chat{
-		Model:         gemmaModel,
-		KeepAlive:     defKeepAlive,
-		Stream:        false,
-		logger:        NewConversationLogger(""),
-		registry:      a.ToolRegistry,
-		skillregistry: skillRegistry,
+	config := a.config
+	if config.Model == "" {
+		config = LoadConfig()
 	}
+	a.Thread = newChatFromConfig(config)
+	a.Thread.registry = a.ToolRegistry
+	a.Thread.skillregistry = skillRegistry
 	if a.ToolRegistry != nil {
 		if selectSkill, ok := a.ToolRegistry.tools["select_skill"].(*SelectSkill); ok {
 			selectSkill.Chat = a.Thread

@@ -1,4 +1,4 @@
-module AIMS2
+module github.com/gamershoney/AIMS2/AIMS2
 
 go 1.25.0
 

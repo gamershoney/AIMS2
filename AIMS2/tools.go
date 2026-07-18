@@ -12,18 +12,21 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"AIMS2/importer"
+	"github.com/gamershoney/AIMS2/AIMS2/importer"
 )
 
 const (
-	apiEndpoint     = "https://ollama.com/api/web_search"
 	maxToolResponse = 12000
 )
 
-func InitializeTools() *Registry {
+func InitializeTools(config Config) *Registry {
 	r := &Registry{}
 	r.tools = make(map[string]Tool)
-	r.Register(&WebSearchTool{})
+	r.Register(&WebSearchTool{
+		URL:    config.WebSearchAPIURL,
+		APIKey: config.WebSearchAPIKey,
+		Client: config.httpClient(),
+	})
 	r.Register(&StockCheck{})
 	r.Register(&NotesTool{})
 	r.Register(&PriorityVendor{})
@@ -116,7 +119,9 @@ type Tool interface {
 }
 
 type WebSearchTool struct {
-	URL string
+	URL    string
+	APIKey string
+	Client *http.Client
 }
 
 func (t *WebSearchTool) Name() string {
@@ -147,7 +152,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 		return tr
 	}
 	rs := func() (string, error) {
-		searchResults, err := RunWebSearch(qs)
+		searchResults, err := runWebSearch(ctx, qs, t.URL, t.APIKey, t.Client)
 		if err != nil {
 			fmt.Println("Error on search: ", err)
 		}
@@ -162,7 +167,20 @@ func (t *WebSearchTool) Permission() ToolPermission {
 }
 
 func RunWebSearch(qry string) (string, error) {
-	//ctx := context.TODO
+	config := LoadConfig()
+	return runWebSearch(context.Background(), qry, config.WebSearchAPIURL, config.WebSearchAPIKey, config.httpClient())
+}
+
+func runWebSearch(ctx context.Context, qry, endpoint, apiKey string, client *http.Client) (string, error) {
+	if strings.TrimSpace(apiKey) == "" {
+		return "", errors.New("web search is not configured: set OLLAMA_API_KEY")
+	}
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = defaultWebSearchURL
+	}
+	if client == nil {
+		client = (&Config{}).httpClient()
+	}
 
 	body := &struct {
 		Query      string `json:"query"`
@@ -183,24 +201,26 @@ func RunWebSearch(qry string) (string, error) {
 		return "", err
 	}
 	jrdr := bytes.NewReader(jbdy)
-	rq, err := http.NewRequest("POST", apiEndpoint, jrdr)
+	rq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, jrdr)
 	if err != nil {
-		fmt.Println("error: creating new request: ", err)
+		return "", fmt.Errorf("create web search request: %w", err)
 	}
 	rq.Header.Set("Content-Type", "application/json")
-	rq.Header.Set("Authorization", "Bearer "+"3fb93a7acbe44f74b53612ec567268a6.rIM2NDZ_3eFZmDMkF-4QpjvJ")
+	rq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{}
 	resp, err := client.Do(rq)
 	if err != nil {
 		fmt.Println("Error on post request", err)
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("web search returned HTTP %d", resp.StatusCode)
+	}
 
-	b, err := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		fmt.Println("error: Cannot read response body in web search")
+		return "", fmt.Errorf("read web search response: %w", err)
 	}
 
 	err = json.Unmarshal(b, &qryReturn)
@@ -727,6 +747,12 @@ func (t *SelectSkill) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 	session := t.Registry.RunSkill(selected, reason)
 	if t.Chat != nil {
+		session.Chat.Model = t.Chat.Model
+		session.Chat.KeepAlive = t.Chat.KeepAlive
+		session.Chat.APIURL = t.Chat.APIURL
+		session.Chat.HTTPClient = t.Chat.HTTPClient
+		session.Chat.DebugPayloads = t.Chat.DebugPayloads
+		session.Chat.logger = t.Chat.logger
 		t.Chat.skillSession = session
 	}
 

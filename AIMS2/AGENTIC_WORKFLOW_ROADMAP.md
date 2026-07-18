@@ -28,7 +28,7 @@ Build a reliable supervised agent that can complete deeper purchasing and invent
 - [x] Code-enforced permission gate for state-changing tools
 - [x] Frontend permission popup with explicit Allow and Deny actions
 - [x] Conversation log excluded from Git
-- [ ] Production config and secrets moved out of code
+- [x] Production config and secrets moved out of code
 - [ ] Reliable multi-step business workflows
 
 ### Current Agentic Workflow Assessment
@@ -74,7 +74,7 @@ Reduce the amount of inventory data placed directly into model context.
   "count": 1,
   "results": [
     {
-      "stock_number": "3M-16114",
+      "stock_number": "TEST-16114",
       "store_id": 1,
       "description": "Example inventory item",
       "on_hand": 4,
@@ -90,14 +90,14 @@ When a note exists, `stock_check` includes compact note signals:
 
 ```json
 {
-  "stock_number": "3M-16114",
+  "stock_number": "TEST-16114",
   "store_id": 1,
   "description": "Example inventory item",
   "on_hand": 4,
   "confidence_score": 100,
   "match_type": "Exact Stock Number",
   "has_note": true,
-  "note": "Keep extra on hand for contract customer",
+  "note": "Synthetic replenishment example",
   "is_critical": true
 }
 ```
@@ -327,12 +327,13 @@ This is the best first skill with the tools currently available because it can u
 
 These items are planned for production configuration rather than the workflow implementation itself.
 
-- [ ] Move API keys to environment variables or secret management
-- [ ] Move model and service endpoints to configuration
+- [x] Move API keys to environment variables or secret management
+- [x] Move model and service endpoints to configuration
 - [ ] Rotate any credentials previously committed to Git
-- [ ] Configure safe logging and redact sensitive values
+- [x] Disable conversation logging and full payload debugging by default
+- [ ] Add field-level redaction when logging is enabled
 - [x] Add `conversation_log.jsonl` to `.gitignore`
-- [ ] Decide whether conversation logs should be disabled, redacted, or stored outside the repo by default
+- [x] Keep conversation logging disabled unless an explicit external path is configured
 - [ ] Define access controls for state-changing tools
 
 ## Recommended Implementation Order

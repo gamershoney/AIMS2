@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"unicode"
@@ -36,7 +38,19 @@ type InventoryItem struct {
 var dbSQL string
 
 func OpenDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite", "./importer/inventory.db")
+	dbPath := strings.TrimSpace(os.Getenv("AIMS2_INVENTORY_DB_PATH"))
+	if dbPath == "" {
+		dbPath = filepath.Join("importer", "inventory.db")
+		if _, err := os.Stat("schema.sql"); err == nil {
+			dbPath = "inventory.db"
+		}
+	}
+	if dir := filepath.Dir(dbPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("create inventory database directory: %w", err)
+		}
+	}
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		fmt.Printf("error: could not connect to db:%v\n ", err)
 		err = errors.New("could not connect to DB")

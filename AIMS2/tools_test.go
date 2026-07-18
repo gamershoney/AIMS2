@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"AIMS2/importer"
+	"github.com/gamershoney/AIMS2/AIMS2/importer"
 )
 
 func TestRunToolCalls(t *testing.T) {
@@ -20,7 +20,7 @@ func TestRunToolCalls(t *testing.T) {
 		}{
 			Index:     1,
 			Name:      "stock_check",
-			Arguments: map[string]any{"query": "3M-16114"},
+			Arguments: map[string]any{"query": "TEST-16114"},
 		},
 	}
 
@@ -41,7 +41,7 @@ func TestStockCheckExecuteReturnsWorkflowState(t *testing.T) {
 		}{
 			Index:     1,
 			Name:      "stock_check",
-			Arguments: map[string]any{"query": "3M-16114"},
+			Arguments: map[string]any{"query": "TEST-16114"},
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestStockCheckExecuteReturnsWorkflowState(t *testing.T) {
 	if result.State.LastToolUsed != "stock_check" {
 		t.Fatalf("expected last tool used to be stock_check, got %q", result.State.LastToolUsed)
 	}
-	if result.State.LastItemSearch != "3M-16114" {
+	if result.State.LastItemSearch != "TEST-16114" {
 		t.Fatalf("expected last item search to be recorded, got %q", result.State.LastItemSearch)
 	}
 	if result.State.LastItemFound != "" {
@@ -87,7 +87,7 @@ func TestRunToolCallsAppliesWorkflowState(t *testing.T) {
 				}{
 					Index:     1,
 					Name:      "stock_check",
-					Arguments: map[string]any{"query": "3M-16114"},
+					Arguments: map[string]any{"query": "TEST-16114"},
 				},
 			},
 		},
@@ -106,7 +106,7 @@ func TestRunToolCallsAppliesWorkflowState(t *testing.T) {
 	if chat.workflowState.LastToolUsed != "stock_check" {
 		t.Fatalf("expected last tool used to be stock_check, got %q", chat.workflowState.LastToolUsed)
 	}
-	if chat.workflowState.LastItemSearch != "3M-16114" {
+	if chat.workflowState.LastItemSearch != "TEST-16114" {
 		t.Fatalf("expected last item search to be recorded, got %q", chat.workflowState.LastItemSearch)
 	}
 	if len(chat.Messages) < 2 {
@@ -119,7 +119,7 @@ func TestRunToolCallsAppliesWorkflowState(t *testing.T) {
 	for _, want := range []string{
 		"Current Working State:",
 		`"last_tool_used": "stock_check"`,
-		`"last_item_searched": "3M-16114"`,
+		`"last_item_searched": "TEST-16114"`,
 	} {
 		if !strings.Contains(stateMessage.Content, want) {
 			t.Fatalf("workflow state message missing %q: %s", want, stateMessage.Content)
@@ -132,11 +132,11 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 	results := []*importer.ReturnResult{
 		{
 			Item: importer.InventoryItem{
-				StockNumber:      "3M-16114",
+				StockNumber:      "TEST-16114",
 				Location:         1,
 				Description:      "Example inventory item",
-				VendorNumber:     "3M",
-				VendorProdNumber: "16114",
+				VendorNumber:     "TEST",
+				VendorProdNumber: "SYNTH-16114",
 				Price:            99.95,
 				Cost:             50.25,
 				OnHand:           4,
@@ -178,7 +178,7 @@ func TestStockCheckParseInventoryDataReturnsCompactResults(t *testing.T) {
 		match.ConfidenceScore,
 		match.MatchType,
 	)
-	if match.StockNumber != "3M-16114" || match.StoreID != 1 || match.OnHand != 4 || match.ConfidenceScore != 100 {
+	if match.StockNumber != "TEST-16114" || match.StoreID != 1 || match.OnHand != 4 || match.ConfidenceScore != 100 {
 		t.Fatalf("unexpected compact match: %+v", match)
 	}
 	if match.HasNote {
@@ -212,12 +212,12 @@ func TestStockCheckParseInventoryDataIncludesNoteWhenPresent(t *testing.T) {
 		{
 			Item: importer.InventoryItem{
 				Location:    1,
-				StockNumber: "3M-16114",
+				StockNumber: "TEST-16114",
 				Description: "Example inventory item",
 				OnHand:      4,
 			},
 			Note: &importer.Note{
-				StockNumber:   "3M-16114",
+				StockNumber:   "TEST-16114",
 				Location:      1,
 				Note:          "Keep extra on hand for contract customer",
 				IsCritical:    true,
@@ -366,7 +366,7 @@ func TestApplyStateReplacesReservedSystemMessage(t *testing.T) {
 	state := &WorkflowState{
 		LastToolUsed:   "item_details",
 		LastItemSearch: "000068",
-		LastItemFound:  "ME-000068",
+		LastItemFound:  "TEST-000068",
 	}
 	chat := &Chat{
 		Messages: []Messages{
@@ -395,7 +395,7 @@ func TestApplyStateReplacesReservedSystemMessage(t *testing.T) {
 		"Current Working State:",
 		`"last_tool_used": "item_details"`,
 		`"last_item_searched": "000068"`,
-		`"last_item_found": "ME-000068"`,
+		`"last_item_found": "TEST-000068"`,
 	} {
 		if !strings.Contains(stateMsg.Content, want) {
 			t.Fatalf("workflow state message missing %q: %s", want, stateMsg.Content)
@@ -409,7 +409,7 @@ func TestApplyStateReplacesReservedSystemMessage(t *testing.T) {
 	nextState := &WorkflowState{
 		LastToolUsed:   "stock_check",
 		LastItemSearch: "000068",
-		LastItemFound:  "ME-000068",
+		LastItemFound:  "TEST-000068",
 	}
 	if err := chat.ApplyState(nextState); err != nil {
 		t.Fatalf("re-apply state: %v", err)
@@ -429,7 +429,7 @@ func TestApplyStateReplacesReservedSystemMessage(t *testing.T) {
 func TestApplyStateWithMissingReservedSlotDoesNotOverwriteUserMessage(t *testing.T) {
 	state := &WorkflowState{
 		LastToolUsed:  "item_details",
-		LastItemFound: "ME-000068",
+		LastItemFound: "TEST-000068",
 	}
 	chat := &Chat{
 		Messages: []Messages{
@@ -505,7 +505,7 @@ func TestRunRequiredDetailFollowUpsFetchesDetailsForCostQuestion(t *testing.T) {
 	chat := &Chat{
 		registry: registry,
 		Messages: []Messages{
-			{Role: "user", Content: "What is our cost on WLM-WMK14T-35?"},
+			{Role: "user", Content: "What is our cost on TEST-PART-35-A?"},
 		},
 	}
 
@@ -516,10 +516,10 @@ func TestRunRequiredDetailFollowUpsFetchesDetailsForCostQuestion(t *testing.T) {
 				"count": 1,
 				"results": [
 					{
-						"stock_number": "WLM-WMK14T-35",
+						"stock_number": "TEST-PART-35-A",
 						"store_id": 1,
-						"description": "CONTACT TIP .035 TAPER",
-						"on_hand": 190,
+						"description": "Synthetic inventory component",
+						"on_hand": 25,
 						"confidence_score": 580,
 						"match_type": "Exact Stock Number",
 						"has_note": true
@@ -536,10 +536,10 @@ func TestRunRequiredDetailFollowUpsFetchesDetailsForCostQuestion(t *testing.T) {
 	if followUps[0].Name != "item_details" {
 		t.Fatalf("expected item_details follow-up, got %+v", followUps[0])
 	}
-	if !strings.Contains(followUps[0].Response, `"Cost":0.6588`) {
+	if !strings.Contains(followUps[0].Response, `"Cost":12.34`) {
 		t.Fatalf("expected detail response with cost, got %s", followUps[0].Response)
 	}
-	if chat.workflowState == nil || chat.workflowState.LastItemFound != "WLM-WMK14T-35" {
+	if chat.workflowState == nil || chat.workflowState.LastItemFound != "TEST-PART-35-A" {
 		t.Fatalf("expected item_details follow-up to apply workflow state, got %+v", chat.workflowState)
 	}
 }
@@ -551,7 +551,7 @@ func TestRunRequiredDetailFollowUpsSkipsAvailabilityOnlyQuestion(t *testing.T) {
 	chat := &Chat{
 		registry: registry,
 		Messages: []Messages{
-			{Role: "user", Content: "Do we stock WLM-WMK14T-35?"},
+			{Role: "user", Content: "Do we stock TEST-PART-35-A?"},
 		},
 	}
 
@@ -562,10 +562,10 @@ func TestRunRequiredDetailFollowUpsSkipsAvailabilityOnlyQuestion(t *testing.T) {
 				"count": 1,
 				"results": [
 					{
-						"stock_number": "WLM-WMK14T-35",
+						"stock_number": "TEST-PART-35-A",
 						"store_id": 1,
-						"description": "CONTACT TIP .035 TAPER",
-						"on_hand": 190,
+						"description": "Synthetic inventory component",
+						"on_hand": 25,
 						"confidence_score": 580,
 						"match_type": "Exact Stock Number",
 						"has_note": false
@@ -588,7 +588,7 @@ func TestRunRequiredDetailFollowUpsSkipsAmbiguousStockCheckResults(t *testing.T)
 	chat := &Chat{
 		registry: registry,
 		Messages: []Messages{
-			{Role: "user", Content: "What is our cost on 14T-35?"},
+			{Role: "user", Content: "What is our cost on PART-35?"},
 		},
 	}
 
@@ -598,8 +598,8 @@ func TestRunRequiredDetailFollowUpsSkipsAmbiguousStockCheckResults(t *testing.T)
 			Response: `{
 				"count": 2,
 				"results": [
-					{"stock_number": "WLM-WMK14T-35", "store_id": 1, "description": "CONTACT TIP .035 TAPER", "on_hand": 190, "confidence_score": 280, "match_type": "Weak", "has_note": false},
-					{"stock_number": "WLM-WMK14T-35-5", "store_id": 1, "description": "CONTACT TIP .035 TAPERED", "on_hand": 10, "confidence_score": 280, "match_type": "Weak", "has_note": false}
+					{"stock_number": "TEST-PART-35-A", "store_id": 1, "description": "Synthetic inventory component A", "on_hand": 25, "confidence_score": 280, "match_type": "Weak", "has_note": false},
+					{"stock_number": "TEST-PART-35-B", "store_id": 1, "description": "Synthetic inventory component B", "on_hand": 5, "confidence_score": 280, "match_type": "Weak", "has_note": false}
 				]
 			}`,
 		},
@@ -1248,7 +1248,7 @@ func (fakeItemDetailsTool) Execute(ctx context.Context, tc ToolCall) ToolResult 
 	sku, _ := tc.Function.Arguments["stock_number"].(string)
 	return ToolResult{
 		Name:     "item_details",
-		Response: `{"item":{"stock_number":"` + sku + `","Cost":0.6588,"Price":1.88}}`,
+		Response: `{"item":{"stock_number":"` + sku + `","Cost":12.34,"Price":19.99}}`,
 		State: &WorkflowState{
 			LastToolUsed:   "item_details",
 			LastItemSearch: sku,
