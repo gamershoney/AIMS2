@@ -6,8 +6,16 @@ export function ClearChat() {
   return window['go']['main']['App']['ClearChat']();
 }
 
+export function GetPendingPermission() {
+  return window['go']['main']['App']['GetPendingPermission']();
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
+}
+
+export function ResolveToolPermission(arg1) {
+  return window['go']['main']['App']['ResolveToolPermission'](arg1);
 }
 
 export function SendMsg(arg1) {

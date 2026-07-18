@@ -21,6 +21,12 @@ Build a reliable supervised agent that can complete deeper purchasing and invent
 - [x] In-memory workflow state slot for recent tool context
 - [x] Context compaction for old raw tool messages
 - [x] Desktop chat interface
+- [x] Skill registry and `SKILL.md` parser
+- [x] Isolated skill chat sessions with per-skill tool allowlists
+- [x] Bounded skill runner with completion summaries returned to the parent chat
+- [x] In-memory skill/job state with status, summary, warnings, and data
+- [x] Code-enforced permission gate for state-changing tools
+- [x] Frontend permission popup with explicit Allow and Deny actions
 - [x] Conversation log excluded from Git
 - [ ] Production config and secrets moved out of code
 - [ ] Reliable multi-step business workflows
@@ -33,7 +39,9 @@ The project now has a usable tool foundation for supervised inventory assistance
 2. `item_details` retrieves full inventory data only after a specific `stock_number` is known.
 3. Tool descriptions now tell the model when to use each tool and when not to.
 
-The remaining gap is not basic tool calling. The remaining gap is workflow control: durable cross-session state, deterministic purchasing/reorder tools, stronger bounded-context telemetry, confirmation rules enforced in code, and end-to-end evaluations.
+The project now has the foundation of a supervised workflow runner. The parent chat can select a parsed skill, create an isolated child conversation, expose only that skill's allowed tools, enforce a maximum number of steps, update skill state, and return a compact completion summary to the parent.
+
+State-changing tools are now paused in code until the user approves or denies the exact pending call in the frontend. The remaining gap is production-grade business execution: deterministic purchasing/reorder tools, durable cross-session state and resume behavior, stronger failure recovery, and repeatable end-to-end evaluations.
 
 ## Milestone 1: Compact Tool Results
 
@@ -112,8 +120,8 @@ Move filtering, calculations, sorting, and deduplication into deterministic Go c
 - [ ] Implement `prepare_purchase_recommendation`
 - [ ] Implement `compare_inventory_items`
 - [ ] Return structured summaries instead of raw database rows
-- [ ] Enforce read-only vs state-changing behavior in code, not just descriptions
-- [ ] Add confirmation gating before `make_note`
+- [x] Enforce read-only vs state-changing behavior in code, not just descriptions
+- [x] Add confirmation gating before `make_note`
 
 ### Acceptance Criteria
 
@@ -130,10 +138,11 @@ Store workflow progress outside the conversation history.
 - [x] Add a reserved system-message slot for current workflow state
 - [x] Update workflow state from tool results
 - [x] Apply workflow state during tool execution
-- [ ] Assign each workflow a stable ID
-- [ ] Track the workflow goal and current stage
+- [x] Assign each active skill session an in-memory job ID
+- [x] Track the workflow reason and lifecycle state
 - [ ] Track selected inventory item IDs
-- [ ] Track decisions, assumptions, and warnings
+- [x] Track compact summaries, warnings, and extensible skill data
+- [ ] Track decisions and assumptions as explicit typed records
 - [x] Persist workflow state between model turns in memory
 - [x] Send current relevant state to the model
 - [ ] Support resuming and cancelling workflows
@@ -161,6 +170,22 @@ type WorkflowState struct {
 }
 ```
 
+Current skill-session state:
+
+```go
+type SkillState struct {
+    JobID         int
+    SkillName     string
+    StateName     StateName
+    EnteredReason string
+    Status        string
+    Summary       string
+    Data          map[string]any
+    Warnings      []string
+    PendingTool   string
+}
+```
+
 ### Acceptance Criteria
 
 - A workflow can continue without replaying every previous tool result. ✅
@@ -172,30 +197,37 @@ type WorkflowState struct {
 
 Tool results can now return workflow state, and `RunToolCalls` applies that state into a reserved system message. This gives the model a compact working memory such as the last tool used, the last item searched, and the last confirmed item found.
 
-This is intentionally still a minimal state layer. It is not yet a full durable workflow engine: there are no stable workflow IDs, explicit stages, selected item ID lists, decision history, warning history, resume/cancel behavior, or cross-session persistence.
+The skill runner now adds an in-memory job ID and lifecycle state (`entered`, `working`, or `completed`), along with summary, warning, pending-permission, and extensible data fields. The state is injected into the isolated skill chat and synchronized back to the parent workflow.
+
+This is not yet a durable workflow engine. Job IDs are process-local, stages are broad lifecycle states rather than business-specific stages, and there is no selected-item list, typed decision history, resume/cancel behavior, or cross-session persistence.
 
 ## Milestone 4: Skills and Procedures
 
 Create compact procedural instructions after the supporting tools and workflow state exist.
 
 - [x] Identify the first high-value workflow skill candidate
-- [ ] Keep skills focused on procedure rather than inventory data
-- [ ] Define tool-selection rules for each stage
-- [ ] Define required clarification questions
-- [ ] Define uncertainty and exception handling
-- [ ] Define completion criteria
-- [ ] Define approval boundaries for state-changing actions
+- [x] Parse skill metadata and full Markdown bodies from `SKILL.md`
+- [x] Keep skills focused on procedure rather than inventory data
+- [x] Define tool-selection rules for each stage
+- [x] Define required clarification questions
+- [x] Define uncertainty and exception handling
+- [x] Define completion criteria and final summary schemas
+- [x] Define approval boundaries for state-changing actions
+- [x] Create isolated child chats with only allowed skill tools
+- [x] Add internal `update_skill_state` and `complete_skill` tools
+- [x] Stop skill execution at the configured `max_steps`
+- [x] Return completed skill summaries to the parent chat
 
 ### Initial Skill Candidate: Supervised Inventory Investigation
 
 This is the best first skill with the tools currently available because it can use `stock_check`, `item_details`, `priority_vendors`, `search_Online`, and `make_note` without requiring new reorder-calculation tools first.
 
-- [ ] Clarify whether the user is identifying an item, checking availability, researching public specs, or saving a note
-- [ ] Use `stock_check` for candidate discovery
-- [ ] Use `item_details` only after an exact `stock_number` is known
-- [ ] Use `search_Online` only for public manufacturer/spec/market information
-- [ ] Require explicit confirmation before calling `make_note`
-- [ ] Summarize uncertainty and ask for clarification when multiple candidates remain
+- [x] Clarify whether the user is identifying an item, checking availability, researching public specs, or saving a note
+- [x] Use `stock_check` for candidate discovery
+- [x] Use `item_details` only after an exact `stock_number` is known
+- [x] Use `search_Online` only for public manufacturer/spec/market information
+- [x] Require explicit confirmation before calling `make_note`
+- [x] Summarize uncertainty and ask for clarification when multiple candidates remain
 
 ### Later Skill: Vendor Reorder
 
@@ -217,6 +249,8 @@ This is the best first skill with the tools currently available because it can u
 - [ ] Add HTTP request timeouts
 - [ ] Add request cancellation
 - [ ] Add bounded retries for transient failures
+- [x] Enforce per-skill tool allowlists
+- [x] Enforce per-skill maximum step counts
 - [x] Validate required `stock_check.query`
 - [x] Validate `stock_check.in_stock` type
 - [ ] Validate all remaining tool arguments
@@ -227,8 +261,10 @@ This is the best first skill with the tools currently available because it can u
 - [x] Compact context before and after model responses once the turn threshold is reached
 - [x] Log model request byte size and message count
 - [ ] Add conversation memory summarization
-- [ ] Correctly reset backend state when starting a new chat
-- [ ] Require user confirmation before state-changing operations
+- [x] Correctly reset backend state when starting a new chat
+- [x] Require user confirmation before state-changing operations
+- [x] Present pending permission details in the frontend
+- [x] Resume the paused skill after approval or denial
 - [ ] Fix `make_note` numeric argument parsing from JSON `float64`
 - [ ] Return immediately after validation errors in `make_note` and `item_details`
 - [ ] Add deterministic tool ordering
@@ -250,13 +286,23 @@ This is the best first skill with the tools currently available because it can u
 - [x] Test workflow-state system slot replacement
 - [x] Test missing workflow-state slot does not overwrite user messages
 - [x] Test compaction drops old tool messages and old assistant tool calls
+- [x] Test skill metadata parsing and full skill-body loading
+- [x] Test skill selection creates isolated state and allowed tools
+- [x] Test disallowed tools are rejected inside an active skill
+- [x] Test skill-state updates and completion
+- [x] Test completed skill summaries return to the parent chat
+- [x] Test the parent loop stops after skill selection
+- [x] Test permission-required tools do not execute before approval
+- [x] Test frontend permission requests expose pending tool details
+- [x] Test frontend approval resumes and executes the pending tool
+- [x] Test new chat preserves the skill registry and updates the selector pointer
 - [ ] Replace remaining print-only tests with assertions
 - [ ] Use isolated temporary databases in tests
 - [ ] Test compact result limits
 - [ ] Test invalid and missing tool arguments
 - [ ] Test workflow interruption and resumption
 - [ ] Test tool failure recovery
-- [ ] Test approval requirements
+- [x] Test approval requirements
 - [ ] Create scripted end-to-end workflow scenarios
 - [ ] Fix `go test ./...` working-directory dependency in `importer` tests
 
@@ -292,14 +338,13 @@ These items are planned for production configuration rather than the workflow im
 ## Recommended Implementation Order
 
 1. Fix `make_note` and `item_details` validation/error-return behavior.
-2. Add confirmation gating before state-changing tool calls.
-3. Add tests for compact result limits.
-4. Add deterministic tool ordering.
-5. Add HTTP timeouts and cancellation.
-6. Create the first skill: supervised inventory investigation.
-7. Implement the first workflow-oriented vendor reorder tool.
-8. Introduce persistent workflow state.
-9. Build end-to-end evaluations.
+2. Add tests for compact result limits and remaining invalid tool arguments.
+3. Implement deterministic reorder-candidate and quantity-calculation tools.
+4. Add deterministic tool ordering for dependent calls.
+5. Add HTTP timeouts, cancellation, and bounded retries.
+6. Add typed order-draft state, selected item references, and decision history.
+7. Add workflow cancellation and durable resume support.
+8. Build scripted end-to-end evaluations for inventory investigation and order drafting.
 
 ## Definition of a Solid Supervised Workflow
 
@@ -307,8 +352,9 @@ These items are planned for production configuration rather than the workflow im
 - [x] Keeps initial inventory search datasets outside model context
 - [ ] Keeps all large tool outputs outside model context
 - [ ] Uses deterministic code for business calculations
-- [ ] Preserves decisions and progress in explicit workflow state
+- [x] Preserves current progress in explicit in-memory workflow state
+- [ ] Preserves typed decisions and progress across application sessions
 - [ ] Explains uncertainty and requests clarification when necessary
-- [ ] Requires approval before making changes
+- [x] Requires approval before permission-gated changes
 - [ ] Recovers safely from tool and model failures
 - [ ] Passes repeatable end-to-end workflow evaluations

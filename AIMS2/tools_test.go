@@ -453,6 +453,51 @@ func TestApplyStateWithMissingReservedSlotDoesNotOverwriteUserMessage(t *testing
 	}
 }
 
+func TestApplySkillStateReplacesReservedSystemMessage(t *testing.T) {
+	chat := &Chat{
+		Messages: []Messages{
+			{Role: "system", Content: "base system prompt"},
+			{Role: "system", ToolName: "skill_catalog", Content: "Available workflow skills:\n- build-order"},
+			{Role: "system", ToolName: "workflow_state", Content: ""},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+			{Role: "user", Content: "Build an order", turn: 1},
+		},
+	}
+	state := &SkillState{
+		JobID:         1,
+		SkillName:     "build-order",
+		StateName:     StateStarted,
+		EnteredReason: "User asked to build an order.",
+		Status:        "active",
+	}
+
+	if err := chat.ApplySkillState(state); err != nil {
+		t.Fatalf("apply skill state: %v", err)
+	}
+	if chat.skillState == nil || chat.skillState.SkillName != "build-order" {
+		t.Fatalf("expected chat skill state to be applied, got %+v", chat.skillState)
+	}
+	if len(chat.Messages) != 5 {
+		t.Fatalf("expected skill state replacement without duplication, got %d messages=%+v", len(chat.Messages), chat.Messages)
+	}
+	if chat.Messages[1].ToolName != "skill_catalog" {
+		t.Fatalf("skill catalog should not be overwritten: %+v", chat.Messages)
+	}
+	skillStateMsg := chat.Messages[3]
+	if skillStateMsg.ToolName != "skill_state" {
+		t.Fatalf("expected skill_state slot, got %+v", skillStateMsg)
+	}
+	for _, want := range []string{
+		"Current Skill State:",
+		`"skill_name": "build-order"`,
+		`"state_name": "entered"`,
+	} {
+		if !strings.Contains(skillStateMsg.Content, want) {
+			t.Fatalf("skill state message missing %q: %s", want, skillStateMsg.Content)
+		}
+	}
+}
+
 func TestRunRequiredDetailFollowUpsFetchesDetailsForCostQuestion(t *testing.T) {
 	registry := &Registry{tools: map[string]Tool{}}
 	registry.Register(fakeItemDetailsTool{})
@@ -629,10 +674,10 @@ Use this skill when the user wants to build an order.
 	}
 }
 
-func TestNewSkillRegistryIndexesSkillTools(t *testing.T) {
+func TestNewSkillRegistryIndexesTools(t *testing.T) {
 	registry := NewSkillRegistry([]Tool{
-		fakeSkillTool{name: "approval_tool", permission: PermissionRequired},
-		fakeSkillTool{name: "readonly_tool", permission: PermissionNone},
+		fakeTool{name: "approval_tool", permission: PermissionRequired},
+		fakeTool{name: "readonly_tool", permission: PermissionNone},
 		fakeItemDetailsTool{},
 	})
 
@@ -653,8 +698,535 @@ func TestNewSkillRegistryIndexesSkillTools(t *testing.T) {
 	if readOnly.Permission() != PermissionNone {
 		t.Fatalf("expected readonly_tool permission none, got %q", readOnly.Permission())
 	}
-	if _, exists := registry.Tools["item_details"]; exists {
-		t.Fatalf("expected non-SkillTool item_details to be ignored, got %+v", registry.Tools)
+	itemDetails, exists := registry.Tools["item_details"]
+	if !exists {
+		t.Fatalf("expected item_details to be indexed, got %+v", registry.Tools)
+	}
+	if itemDetails.Permission() != PermissionNone {
+		t.Fatalf("expected item_details permission none, got %q", itemDetails.Permission())
+	}
+}
+
+func TestModelToolsJSONUsesFunctionField(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(fakeTool{name: "readonly_tool", permission: PermissionNone})
+
+	b, err := json.Marshal(registry.ModelTools())
+	if err != nil {
+		t.Fatalf("marshal model tools: %v", err)
+	}
+	raw := string(b)
+	if !strings.Contains(raw, `"function"`) {
+		t.Fatalf("expected model tool JSON to include function field, got %s", raw)
+	}
+	if strings.Contains(raw, "function,omitzero") {
+		t.Fatalf("model tool JSON has invalid function tag: %s", raw)
+	}
+}
+
+func TestSelectSkillReturnsSkillStateAndSession(t *testing.T) {
+	skill := &Skill{
+		Name:         "build-order",
+		Description:  "Build a reviewable order draft.",
+		AllowedTools: []string{"item_details"},
+		Body:         "# Build Order\nUse item details to evaluate order candidates.",
+	}
+	registry := NewSkillRegistry([]Tool{
+		fakeItemDetailsTool{},
+		fakeTool{name: "approval_tool", permission: PermissionRequired},
+	})
+	registry.RegisterSkill(skill)
+	chat := &Chat{}
+	tool := &SelectSkill{Registry: registry, Chat: chat}
+
+	tc := ToolCall{}
+	tc.Function.Name = "select_skill"
+	tc.Function.Arguments = map[string]any{
+		"skill_name":     "build-order",
+		"entered_reason": "User asked to build an order.",
+	}
+
+	result := tool.Execute(context.TODO(), tc)
+	if result.Error != nil {
+		t.Fatalf("select skill failed: %v", result.Error)
+	}
+	if result.SkillState == nil {
+		t.Fatalf("expected select_skill to return skill state")
+	}
+	if result.SkillState.JobID == 0 {
+		t.Fatalf("expected non-zero job id")
+	}
+	if result.SkillState.SkillName != "build-order" {
+		t.Fatalf("unexpected skill name: %+v", result.SkillState)
+	}
+	if result.SkillState.StateName != StateStarted {
+		t.Fatalf("unexpected state name: %+v", result.SkillState)
+	}
+	if result.SkillState.EnteredReason != "User asked to build an order." {
+		t.Fatalf("unexpected entered reason: %+v", result.SkillState)
+	}
+	if chat.skillSession == nil {
+		t.Fatalf("expected select_skill to attach a skill session to chat")
+	}
+	if _, ok := chat.skillSession.AllowedTools["item_details"]; !ok {
+		t.Fatalf("expected allowed item_details tool, got %+v", chat.skillSession.AllowedTools)
+	}
+	if _, ok := chat.skillSession.AllowedTools["approval_tool"]; ok {
+		t.Fatalf("did not expect disallowed approval_tool, got %+v", chat.skillSession.AllowedTools)
+	}
+	if chat.skillSession.Chat == nil {
+		t.Fatalf("expected isolated skill chat to be initialized")
+	}
+	toolNames := modelToolNames(chat.skillSession.Chat.Tools)
+	for _, want := range []string{"item_details", "update_skill_state", "complete_skill"} {
+		if !toolNames[want] {
+			t.Fatalf("expected isolated skill chat to expose %s, got %+v", want, chat.skillSession.Chat.Tools)
+		}
+	}
+	if len(chat.skillSession.Chat.Messages) < 2 {
+		t.Fatalf("expected isolated skill chat messages to be initialized, got %+v", chat.skillSession.Chat.Messages)
+	}
+	if !strings.Contains(chat.skillSession.Chat.Messages[0].Content, "Use item details to evaluate order candidates.") {
+		t.Fatalf("expected isolated skill chat to include skill body, got %q", chat.skillSession.Chat.Messages[0].Content)
+	}
+	if chat.skillSession.Chat.Messages[1].ToolName != "skill_state" {
+		t.Fatalf("expected isolated skill chat to include skill state slot, got %+v", chat.skillSession.Chat.Messages)
+	}
+}
+
+func TestActiveSkillRejectsDisallowedTool(t *testing.T) {
+	registry := &Registry{tools: map[string]Tool{}}
+	registry.Register(fakeTool{name: "readonly_tool", permission: PermissionNone})
+	registry.Register(fakeTool{name: "approval_tool", permission: PermissionRequired})
+
+	chat := &Chat{
+		registry: registry,
+		skillState: &SkillState{
+			JobID:     1,
+			SkillName: "test-skill",
+			StateName: StateStarted,
+			Status:    SkillStatusActive,
+		},
+		skillSession: &SkillSession{
+			AllowedTools: ToolMap{
+				"readonly_tool": fakeTool{name: "readonly_tool", permission: PermissionNone},
+			},
+		},
+	}
+
+	ai := AIMessage{ToolCalls: []ToolCall{newToolCall("approval_tool", nil)}}
+	results := chat.RunToolCalls(ai)
+
+	if len(results) != 1 {
+		t.Fatalf("expected one tool result, got %+v", results)
+	}
+	if results[0].Error == nil {
+		t.Fatalf("expected disallowed tool error, got %+v", results[0])
+	}
+	if !strings.Contains(results[0].Error.Error(), "not allowed") {
+		t.Fatalf("expected not allowed error, got %v", results[0].Error)
+	}
+}
+
+func TestActiveSkillBlocksPermissionRequiredTool(t *testing.T) {
+	chat := &Chat{
+		Messages: []Messages{
+			{Role: "system", Content: "base"},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+		},
+		skillState: &SkillState{
+			JobID:     2,
+			SkillName: "permission-check",
+			StateName: StateStarted,
+			Status:    SkillStatusActive,
+		},
+		skillSession: &SkillSession{
+			AllowedTools: ToolMap{
+				"approval_tool": fakeTool{name: "approval_tool", permission: PermissionRequired},
+			},
+		},
+	}
+
+	ai := AIMessage{ToolCalls: []ToolCall{newToolCall("approval_tool", map[string]any{"note": "save this"})}}
+	results := chat.RunToolCalls(ai)
+
+	if len(results) != 1 {
+		t.Fatalf("expected one tool result, got %+v", results)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("expected permission gate to return model-visible result, got error %v", results[0].Error)
+	}
+	if !strings.Contains(results[0].Response, "permission_required") {
+		t.Fatalf("expected permission_required response, got %s", results[0].Response)
+	}
+	if chat.skillState == nil || chat.skillState.Status != SkillStatusWaitingPermission {
+		t.Fatalf("expected skill state waiting permission, got %+v", chat.skillState)
+	}
+	if chat.skillState.PendingTool != "approval_tool" {
+		t.Fatalf("expected pending tool approval_tool, got %+v", chat.skillState)
+	}
+	if chat.skillState.Data["pending_tool_args"] == nil {
+		t.Fatalf("expected pending tool args to be stored, got %+v", chat.skillState.Data)
+	}
+	if !strings.Contains(chat.Messages[1].Content, `"status": "waiting_permission"`) {
+		t.Fatalf("expected skill state system slot to be updated, got %+v", chat.Messages)
+	}
+}
+
+func TestUpdateSkillStateToolUpdatesSharedState(t *testing.T) {
+	state := &SkillState{
+		JobID:     3,
+		SkillName: "build-order",
+		StateName: StateStarted,
+		Status:    SkillStatusActive,
+	}
+	tool := &UpdateSkillState{State: state}
+
+	result := tool.Execute(context.TODO(), newToolCall("update_skill_state", map[string]any{
+		"summary":     "Reviewed two candidates.",
+		"state_key":   "last_vendor",
+		"state_value": "LINCOLN",
+		"warning":     "Quantity still needs approval.",
+	}))
+
+	if result.Error != nil {
+		t.Fatalf("update skill state failed: %v", result.Error)
+	}
+	if result.SkillState != state {
+		t.Fatalf("expected shared state pointer to be returned")
+	}
+	if state.StateName != StateWorking || state.Status != SkillStatusActive {
+		t.Fatalf("unexpected state after update: %+v", state)
+	}
+	if state.Summary != "Reviewed two candidates." {
+		t.Fatalf("unexpected summary: %+v", state)
+	}
+	if state.Data["last_vendor"] != "LINCOLN" {
+		t.Fatalf("expected state data to be written, got %+v", state.Data)
+	}
+	if len(state.Warnings) != 1 {
+		t.Fatalf("expected warning to be stored, got %+v", state.Warnings)
+	}
+}
+
+func TestCompleteSkillToolCompletesSharedState(t *testing.T) {
+	state := &SkillState{
+		JobID:     4,
+		SkillName: "build-order",
+		StateName: StateWorking,
+		Status:    SkillStatusActive,
+	}
+	tool := &CompleteSkill{State: state}
+
+	result := tool.Execute(context.TODO(), newToolCall("complete_skill", map[string]any{
+		"summary": "Order draft ready for review.",
+		"warning": "No quantities were finalized.",
+	}))
+
+	if result.Error != nil {
+		t.Fatalf("complete skill failed: %v", result.Error)
+	}
+	if state.StateName != StateCompleted || state.Status != SkillStatusCompleted {
+		t.Fatalf("expected completed state, got %+v", state)
+	}
+	if state.Summary != "Order draft ready for review." {
+		t.Fatalf("unexpected summary: %+v", state)
+	}
+	if !strings.Contains(result.Response, "skill_completed") {
+		t.Fatalf("expected completion response, got %s", result.Response)
+	}
+}
+
+func TestRunActiveSkillCompletesAndSummarizesToParent(t *testing.T) {
+	skill := &Skill{
+		Name:         "build-order",
+		Description:  "Build an order draft.",
+		AllowedTools: []string{},
+		MaxSteps:     3,
+		Body:         "# Build Order",
+	}
+	session := CreateSession(skill, ToolMap{}, "User asked for an order.")
+	parent := &Chat{
+		Model:        "fake-model",
+		skillState:   session.State,
+		skillSession: session,
+		Messages: []Messages{
+			{Role: "system", Content: "parent"},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+		},
+	}
+
+	calls := 0
+	session.Chat.sendOnceFunc = func(c *Chat) (*Answer, error) {
+		calls++
+		if calls == 1 {
+			return &Answer{
+				Model: "fake-model",
+				Message: AIMessage{
+					Role:      "assistant",
+					ToolCalls: []ToolCall{newToolCall("complete_skill", map[string]any{"summary": "Order draft ready."})},
+				},
+				Done: true,
+			}, nil
+		}
+		return &Answer{
+			Model: "fake-model",
+			Message: AIMessage{
+				Role:    "assistant",
+				Content: "Final model wording.",
+			},
+			Done: true,
+		}, nil
+	}
+
+	answer, err := parent.RunActiveSkill("Build the order.")
+	if err != nil {
+		t.Fatalf("run active skill: %v", err)
+	}
+	if answer.Message.Content != "Order draft ready." {
+		t.Fatalf("expected completed skill summary to be returned, got %q", answer.Message.Content)
+	}
+	if parent.skillSession != nil {
+		t.Fatalf("expected completed skill session to be cleared")
+	}
+	if parent.skillState == nil || parent.skillState.StateName != StateCompleted {
+		t.Fatalf("expected parent skill state to be completed, got %+v", parent.skillState)
+	}
+	foundSummary := false
+	for _, msg := range parent.Messages {
+		if msg.ToolName == "skill_summary" && strings.Contains(msg.Content, "Order draft ready.") {
+			foundSummary = true
+		}
+	}
+	if !foundSummary {
+		t.Fatalf("expected parent chat to receive skill summary, got %+v", parent.Messages)
+	}
+}
+
+func TestParentSendMessageStopsAfterSkillSelection(t *testing.T) {
+	skillRegistry := NewSkillRegistry([]Tool{})
+	skillRegistry.RegisterSkill(&Skill{
+		Name:         "build-order",
+		Description:  "Build an order draft.",
+		AllowedTools: []string{},
+		MaxSteps:     3,
+	})
+	chat := &Chat{
+		Model:         "fake-model",
+		registry:      &Registry{tools: map[string]Tool{}},
+		skillregistry: skillRegistry,
+		Messages: []Messages{
+			{Role: "system", Content: "parent"},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+		},
+	}
+	chat.registry.Register(&SelectSkill{Registry: skillRegistry, Chat: chat})
+
+	calls := 0
+	chat.sendOnceFunc = func(c *Chat) (*Answer, error) {
+		calls++
+		if calls > 1 {
+			t.Fatalf("parent model should stop after skill selection")
+		}
+		return &Answer{
+			Model: "fake-model",
+			Message: AIMessage{
+				Role: "assistant",
+				ToolCalls: []ToolCall{newToolCall("select_skill", map[string]any{
+					"skill_name":     "build-order",
+					"entered_reason": "User asked to build an order.",
+				})},
+			},
+			Done: true,
+		}, nil
+	}
+
+	answer, err := chat.SendMessage()
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one parent model call, got %d", calls)
+	}
+	if !chat.HasActiveSkill() {
+		t.Fatalf("expected active skill after select_skill")
+	}
+	if answer.Message.Content != "Starting workflow skill." {
+		t.Fatalf("unexpected handoff answer: %q", answer.Message.Content)
+	}
+}
+
+func TestRunActiveSkillApprovalExecutesPendingTool(t *testing.T) {
+	recorder := &recordingTool{name: "approval_tool", permission: PermissionRequired}
+	skill := &Skill{
+		Name:         "permission-check",
+		Description:  "Check permission behavior.",
+		AllowedTools: []string{"approval_tool"},
+		MaxSteps:     3,
+	}
+	session := CreateSession(skill, ToolMap{"approval_tool": recorder}, "Need permission.")
+	parent := &Chat{
+		Model:        "fake-model",
+		skillState:   session.State,
+		skillSession: session,
+		Messages: []Messages{
+			{Role: "system", Content: "parent"},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+		},
+	}
+
+	results := parent.RunToolCalls(AIMessage{ToolCalls: []ToolCall{
+		newToolCall("approval_tool", map[string]any{"note": "save this"}),
+	}})
+	if len(results) != 1 || !strings.Contains(results[0].Response, "permission_required") {
+		t.Fatalf("expected permission request, got %+v", results)
+	}
+	if recorder.calls != 0 {
+		t.Fatalf("permission-required tool should not execute before approval")
+	}
+
+	session.Chat.sendOnceFunc = func(c *Chat) (*Answer, error) {
+		return &Answer{
+			Model: "fake-model",
+			Message: AIMessage{
+				Role:    "assistant",
+				Content: "Permissioned tool ran.",
+			},
+			Done: true,
+		}, nil
+	}
+
+	answer, err := parent.RunActiveSkill("approve")
+	if err != nil {
+		t.Fatalf("run active skill approval: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("expected pending tool to execute once after approval, got %d", recorder.calls)
+	}
+	if parent.skillState.Status != SkillStatusActive || parent.skillState.PendingTool != "" {
+		t.Fatalf("expected pending permission to clear, got %+v", parent.skillState)
+	}
+	if answer.Message.Content != "Permissioned tool ran." {
+		t.Fatalf("unexpected answer after approval: %q", answer.Message.Content)
+	}
+}
+
+func TestAppExposesAndResolvesPendingToolPermission(t *testing.T) {
+	recorder := &recordingTool{name: "approval_tool", permission: PermissionRequired}
+	skill := &Skill{
+		Name:         "permission-check",
+		Description:  "Check permission behavior.",
+		AllowedTools: []string{"approval_tool"},
+		MaxSteps:     3,
+	}
+	session := CreateSession(skill, ToolMap{"approval_tool": recorder}, "Validate frontend permission flow.")
+	parent := &Chat{
+		Model:        "fake-model",
+		skillState:   session.State,
+		skillSession: session,
+		Messages: []Messages{
+			{Role: "system", Content: "parent"},
+			{Role: "system", ToolName: "skill_state", Content: ""},
+		},
+	}
+	app := &App{Thread: parent}
+
+	parent.RunToolCalls(AIMessage{ToolCalls: []ToolCall{
+		newToolCall("approval_tool", map[string]any{"note": "save this"}),
+	}})
+
+	request := app.GetPendingPermission()
+	if request == nil {
+		t.Fatal("expected a pending permission request")
+	}
+	if request.Tool != "approval_tool" || request.Description != "recording tool" {
+		t.Fatalf("unexpected permission request: %+v", request)
+	}
+	if request.SkillName != skill.Name || request.JobID != session.State.JobID {
+		t.Fatalf("expected skill metadata in permission request: %+v", request)
+	}
+	if request.Arguments["note"] != "save this" {
+		t.Fatalf("expected pending arguments in permission request: %+v", request.Arguments)
+	}
+	if recorder.calls != 0 {
+		t.Fatalf("permissioned tool ran before frontend approval")
+	}
+
+	session.Chat.sendOnceFunc = func(c *Chat) (*Answer, error) {
+		return &Answer{
+			Model: "fake-model",
+			Message: AIMessage{
+				Role:    "assistant",
+				Content: "Approved action completed.",
+			},
+			Done: true,
+		}, nil
+	}
+
+	response, err := app.ResolveToolPermission(true)
+	if err != nil {
+		t.Fatalf("resolve frontend permission: %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("expected approved tool to run once, got %d", recorder.calls)
+	}
+	if response != "Approved action completed." {
+		t.Fatalf("unexpected permission response: %q", response)
+	}
+	if app.GetPendingPermission() != nil {
+		t.Fatal("expected pending permission to clear after approval")
+	}
+}
+
+func TestClearChatPreservesSkillRegistryAndSelectSkillPointer(t *testing.T) {
+	toolRegistry := &Registry{tools: map[string]Tool{}}
+	skillRegistry := NewSkillRegistry([]Tool{fakeItemDetailsTool{}})
+	skillRegistry.RegisterSkill(&Skill{
+		Name:         "build-order",
+		Description:  "Build an order draft.",
+		AllowedTools: []string{"item_details"},
+	})
+
+	oldChat := &Chat{skillregistry: skillRegistry}
+	selectSkill := &SelectSkill{Registry: skillRegistry, Chat: oldChat}
+	toolRegistry.Register(selectSkill)
+
+	app := &App{
+		Thread:       oldChat,
+		ToolRegistry: toolRegistry,
+	}
+
+	app.ClearChat()
+
+	if app.Thread == nil {
+		t.Fatalf("expected clear chat to create a new chat")
+	}
+	if app.Thread == oldChat {
+		t.Fatalf("expected clear chat to replace old chat")
+	}
+	if app.Thread.skillregistry != skillRegistry {
+		t.Fatalf("expected skill registry to be preserved")
+	}
+	if selectSkill.Chat != app.Thread {
+		t.Fatalf("expected select_skill chat pointer to be updated after clear")
+	}
+	if len(app.Thread.Tools) != 1 || app.Thread.Tools[0].Function.Name != "select_skill" {
+		t.Fatalf("expected model tools to be rebuilt, got %+v", app.Thread.Tools)
+	}
+
+	var hasCatalog, hasWorkflowState, hasSkillState bool
+	for _, msg := range app.Thread.Messages {
+		switch msg.ToolName {
+		case "skill_catalog":
+			hasCatalog = strings.Contains(msg.Content, "build-order")
+		case "workflow_state":
+			hasWorkflowState = true
+		case "skill_state":
+			hasSkillState = true
+		}
+	}
+	if !hasCatalog || !hasWorkflowState || !hasSkillState {
+		t.Fatalf("expected system messages to include catalog/workflow/skill slots, got %+v", app.Thread.Messages)
 	}
 }
 
@@ -685,27 +1257,78 @@ func (fakeItemDetailsTool) Execute(ctx context.Context, tc ToolCall) ToolResult 
 	}
 }
 
-type fakeSkillTool struct {
+func (fakeItemDetailsTool) Permission() ToolPermission {
+	return PermissionNone
+}
+
+type fakeTool struct {
 	name       string
 	permission ToolPermission
 }
 
-func (t fakeSkillTool) Name() string {
+func (t fakeTool) Name() string {
 	return t.name
 }
 
-func (t fakeSkillTool) Description() string {
+func (t fakeTool) Description() string {
 	return "fake skill tool"
 }
 
-func (t fakeSkillTool) Parameters() Parameters {
+func (t fakeTool) Parameters() Parameters {
 	return Parameters{Type: "object"}
 }
 
-func (t fakeSkillTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
+func (t fakeTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	return ToolResult{Name: t.name, Response: "{}"}
 }
 
-func (t fakeSkillTool) Permission() ToolPermission {
+func (t fakeTool) Permission() ToolPermission {
 	return t.permission
+}
+
+type recordingTool struct {
+	name       string
+	permission ToolPermission
+	calls      int
+	lastArgs   map[string]any
+}
+
+func (t *recordingTool) Name() string {
+	return t.name
+}
+
+func (t *recordingTool) Description() string {
+	return "recording tool"
+}
+
+func (t *recordingTool) Parameters() Parameters {
+	return Parameters{Type: "object"}
+}
+
+func (t *recordingTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	t.calls++
+	t.lastArgs = tc.Function.Arguments
+	return ToolResult{Name: t.name, Response: `{"status":"executed"}`}
+}
+
+func (t *recordingTool) Permission() ToolPermission {
+	return t.permission
+}
+
+func newToolCall(name string, args map[string]any) ToolCall {
+	if args == nil {
+		args = map[string]any{}
+	}
+	tc := ToolCall{}
+	tc.Function.Name = name
+	tc.Function.Arguments = args
+	return tc
+}
+
+func modelToolNames(tools []ModelTool) map[string]bool {
+	names := make(map[string]bool)
+	for _, tool := range tools {
+		names[tool.Function.Name] = true
+	}
+	return names
 }

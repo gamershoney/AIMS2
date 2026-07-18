@@ -17,7 +17,11 @@
           <p class="brand-subtitle">Inventory assistant</p>
         </div>
         <span class="flex-1"></span>
-        <button id="new-chat" class="text-white nav-button focus-ring" aria-label="Start a new chat">
+        <div id="app-status" class="status-pill" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="status-label">Ready</span>
+        </div>
+        <button id="new-chat" class="text-white nav-button focus-ring" type="button" aria-label="Start a new chat">
           New Chat
         </button>
       </div>
@@ -25,24 +29,59 @@
         <section id="empty-state" class="empty-state">
           <p class="empty-eyebrow">Ready when you are</p>
           <h1>What should we investigate?</h1>
-          <p class="empty-copy">Ask about stock, cost, received dates, vendor priority, or online comparisons.</p>
+          <p class="empty-copy">Ask about stock, cost, received dates, vendor priority, order drafts, or online comparisons.</p>
           <div class="prompt-grid" aria-label="Example prompts">
             <button class="prompt-card focus-ring" type="button">Do we stock ME-000068?</button>
             <button class="prompt-card focus-ring" type="button">What is our cost on WLM-WMK14T-35?</button>
-            <button class="prompt-card focus-ring" type="button">Which vendors need attention?</button>
+            <button class="prompt-card focus-ring" type="button">Help me build an order for critical low-stock items.</button>
           </div>
         </section>
 
       </div>
-      <div class="chat-input border rounded-2xl border-slate-400 text-slate-300 bg-stone-700 flex p-2">
-        <span id="input-loader" class="loader hidden"></span>
-        <textarea id="textinput" class="inputbox outline-0 resize-none flex-1 pl-3"
-          placeholder="Ask anything..." aria-label="Message"></textarea>
-        <button id="sendBtn" class="inputbox send-button focus-ring" aria-label="Send message">
-          Send
-        </button>
+      <div class="composer-wrap">
+        <div class="chat-input border rounded-2xl border-slate-400 text-slate-300 bg-stone-700 flex p-2">
+          <span id="input-loader" class="loader hidden" aria-hidden="true"></span>
+          <textarea id="textinput" class="inputbox outline-0 resize-none flex-1 pl-3"
+            placeholder="Ask about inventory, item details, vendors, or order workflows..." aria-label="Message" rows="1"></textarea>
+          <button id="sendBtn" class="inputbox send-button focus-ring" type="button" aria-label="Send message">
+            Send
+          </button>
+        </div>
+        <div class="composer-hint">
+          <span>Enter to send</span>
+          <span>Shift+Enter for a new line</span>
+        </div>
       </div>
     </div>
+  </div>
+
+  <div id="permission-modal" class="permission-backdrop hidden" role="dialog" aria-modal="true"
+    aria-labelledby="permission-title" aria-describedby="permission-description">
+    <section class="permission-modal">
+      <div class="permission-icon" aria-hidden="true">!</div>
+      <p class="permission-eyebrow">Permission required</p>
+      <h2 id="permission-title">Allow this action?</h2>
+      <p id="permission-description" class="permission-description"></p>
+      <div class="permission-details">
+        <div class="permission-detail-row">
+          <span>Tool</span>
+          <strong id="permission-tool"></strong>
+        </div>
+        <div id="permission-skill-row" class="permission-detail-row hidden">
+          <span>Workflow</span>
+          <strong id="permission-skill"></strong>
+        </div>
+        <div id="permission-arguments-wrap" class="permission-arguments-wrap hidden">
+          <span>Proposed input</span>
+          <pre id="permission-arguments"></pre>
+        </div>
+      </div>
+      <p id="permission-error" class="permission-error hidden" role="alert"></p>
+      <div class="permission-actions">
+        <button id="deny-permission" class="permission-button permission-deny focus-ring" type="button">Deny</button>
+        <button id="approve-permission" class="permission-button permission-approve focus-ring" type="button">Allow action</button>
+      </div>
+    </section>
   </div>
 
 

@@ -35,10 +35,13 @@ type Chat struct {
 	KeepAlive     string      `json:"keep_alive"`
 	Tools         []ModelTool `json:"tools,omitempty"`
 	workflowState *WorkflowState
+	skillState    *SkillState
 	currentTurn   int
 	registry      *Registry
 	skillregistry *SkillRegistry
+	skillSession  *SkillSession
 	logger        *ConversationLogger
+	sendOnceFunc  func(*Chat) (*Answer, error)
 }
 
 type ToolCall struct {
@@ -67,9 +70,18 @@ func createMessage(m *Chat) ([]byte, error) {
 }
 
 func (m *Chat) SendMessage() (*Answer, error) {
-	const maxToolRounds = 5
+	return m.sendMessageWithLimit(5)
+}
 
+func (m *Chat) sendMessageWithLimit(maxToolRounds int) (*Answer, error) {
 	for round := 0; round < maxToolRounds; round++ {
+		if m.skillSession != nil {
+			m.skillSession.StepCount++
+			if err := m.enforceSkillStepLimit(); err != nil {
+				return nil, err
+			}
+		}
+
 		ansr, err := m.sendOnce()
 		if err != nil {
 			if m.logger != nil {
@@ -111,6 +123,17 @@ func (m *Chat) SendMessage() (*Answer, error) {
 			fmt.Println("Tool Result for tool:", tr.Name, tr.Response)
 			m.AppendMessage("tool", tr.Name, tr.Response)
 		}
+
+		if m.HasActiveSkill() {
+			return &Answer{
+				Model: m.Model,
+				Message: AIMessage{
+					Role:    "assistant",
+					Content: "Starting workflow skill.",
+				},
+				Done: true,
+			}, nil
+		}
 	}
 
 	if m.logger != nil {
@@ -120,6 +143,10 @@ func (m *Chat) SendMessage() (*Answer, error) {
 }
 
 func (m *Chat) sendOnce() (*Answer, error) {
+	if m.sendOnceFunc != nil {
+		return m.sendOnceFunc(m)
+	}
+
 	b, err := createMessage(m)
 	if err != nil {
 		return nil, err
@@ -173,19 +200,207 @@ func (m *Chat) sendOnce() (*Answer, error) {
 	return ansr, nil
 }
 
+func (m *Chat) HasActiveSkill() bool {
+	return m.skillSession != nil &&
+		m.skillState != nil &&
+		m.skillState.StateName != StateCompleted
+}
+
+func (m *Chat) RunActiveSkill(userText string) (*Answer, error) {
+	if !m.HasActiveSkill() {
+		return nil, errors.New("no active skill session")
+	}
+	resolvedPermission := false
+	if m.skillState.Status == SkillStatusWaitingPermission {
+		approved, handled := parsePermissionDecision(userText)
+		if !handled {
+			return &Answer{
+				Model: m.Model,
+				Message: AIMessage{
+					Role:    "assistant",
+					Content: fmt.Sprintf("Permission is required before running %s. Please approve or deny this action.", m.skillState.PendingTool),
+				},
+				Done: true,
+			}, nil
+		}
+		resolvedPermission = true
+
+		result := m.resolvePendingPermission(approved)
+		content := result.Response
+		if result.Error != nil {
+			content = fmt.Sprintf(`{"error":%q}`, result.Error.Error())
+		}
+		m.skillSession.Chat.AppendMessage("tool", result.Name, content)
+		if !approved {
+			return &Answer{
+				Model: m.Model,
+				Message: AIMessage{
+					Role:    "assistant",
+					Content: "Permission denied. I did not run the requested tool.",
+				},
+				Done: true,
+			}, nil
+		}
+	}
+
+	session := m.skillSession
+	if !resolvedPermission && strings.TrimSpace(userText) != "" {
+		session.Chat.currentTurn++
+		session.Chat.AppendMessage("user", "", userText)
+	}
+	maxRounds := session.Skill.MaxSteps
+	if maxRounds <= 0 {
+		maxRounds = 5
+	}
+
+	ansr, err := session.Chat.sendMessageWithLimit(maxRounds)
+	if session.Chat.workflowState != nil {
+		_ = m.ApplyState(session.Chat.workflowState)
+	}
+	if session.Chat.skillState != nil {
+		session.State = session.Chat.skillState
+		_ = m.ApplySkillState(session.State)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if session.State.StateName == StateCompleted {
+		summary := session.State.Summary
+		if strings.TrimSpace(summary) == "" {
+			summary = ansr.Message.Content
+		}
+		m.AppendMessage("system", "skill_summary", buildSkillSummary(session.State))
+		m.skillSession = nil
+		return &Answer{
+			Model: ansr.Model,
+			Message: AIMessage{
+				Role:    "assistant",
+				Content: summary,
+			},
+			Done: true,
+		}, nil
+	}
+
+	return ansr, nil
+}
+
+func (m *Chat) resolvePendingPermission(approved bool) ToolResult {
+	if m.skillState == nil || m.skillState.PendingTool == "" {
+		return ToolResult{Name: "", Error: errors.New("no pending permission request")}
+	}
+
+	toolName := m.skillState.PendingTool
+	args := map[string]any{}
+	if m.skillState.Data != nil {
+		if rawArgs, ok := m.skillState.Data["pending_tool_args"].(map[string]any); ok {
+			args = rawArgs
+		}
+	}
+
+	m.skillState.PendingTool = ""
+	m.skillState.Status = SkillStatusActive
+	m.skillState.StateName = StateWorking
+	if m.skillState.Data != nil {
+		delete(m.skillState.Data, "pending_tool_args")
+	}
+
+	if !approved {
+		_ = m.ApplySkillState(m.skillState)
+		response := fmt.Sprintf(`{"status":"permission_denied","tool":%q}`, toolName)
+		return ToolResult{Name: toolName, Response: response, SkillState: m.skillState}
+	}
+
+	tool, err := m.toolForCall(toolName)
+	if err != nil {
+		return ToolResult{Name: toolName, Error: err, SkillState: m.skillState}
+	}
+
+	tc := ToolCall{}
+	tc.Function.Name = toolName
+	tc.Function.Arguments = args
+
+	result := tool.Execute(context.TODO(), tc)
+	if result.Name == "" {
+		result.Name = toolName
+	}
+	result.Response = result.truncate(maxToolResponse)
+
+	if result.State != nil {
+		_ = m.ApplyState(result.State)
+	}
+	if result.SkillState != nil {
+		_ = m.ApplySkillState(result.SkillState)
+	} else {
+		result.SkillState = m.skillState
+		_ = m.ApplySkillState(m.skillState)
+	}
+	return result
+}
+
+func parsePermissionDecision(text string) (bool, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(text))
+	if normalized == "" {
+		return false, false
+	}
+	approveTerms := []string{"approve", "approved", "allow", "allowed", "yes", "y", "go ahead", "run it"}
+	for _, term := range approveTerms {
+		if normalized == term || strings.Contains(normalized, term) {
+			return true, true
+		}
+	}
+	denyTerms := []string{"deny", "denied", "do not", "don't", "no", "n", "cancel", "stop"}
+	for _, term := range denyTerms {
+		if normalized == term || strings.Contains(normalized, term) {
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func (m *Chat) enforceSkillStepLimit() error {
+	if m.skillSession == nil || m.skillSession.Skill == nil {
+		return nil
+	}
+	maxSteps := m.skillSession.Skill.MaxSteps
+	if maxSteps <= 0 || m.skillSession.StepCount <= maxSteps {
+		return nil
+	}
+	state := m.skillSession.State
+	if state != nil {
+		state.StateName = StateCompleted
+		state.Status = SkillStatusCompleted
+		state.Warnings = append(state.Warnings, fmt.Sprintf("Skill stopped after reaching max_steps=%d.", maxSteps))
+		state.Summary = "Skill stopped because it reached the configured maximum number of steps."
+		_ = m.ApplySkillState(state)
+	}
+	return fmt.Errorf("skill %q exceeded max_steps=%d", m.skillSession.Skill.Name, maxSteps)
+}
+
+func buildSkillSummary(state *SkillState) string {
+	if state == nil {
+		return ""
+	}
+	b, err := json.Marshal(state)
+	if err != nil {
+		return state.Summary
+	}
+	return "Completed Skill State:\n" + string(b)
+}
+
 func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 	ch := make(chan ToolResult, len(ai.ToolCalls))
 	ctx := context.TODO()
 
 	for _, v := range ai.ToolCalls {
-		tool, ok := m.registry.tools[v.Function.Name]
-		if !ok {
+		tool, err := m.toolForCall(v.Function.Name)
+		if err != nil {
 			if m.logger != nil {
-				_ = m.logger.LogError("tool_call", fmt.Sprintf("tool not found: %s", v.Function.Name))
+				_ = m.logger.LogError("tool_call", err.Error())
 			}
 			ch <- ToolResult{
 				Name:  v.Function.Name,
-				Error: errors.New("tool not found"),
+				Error: err,
 			}
 			continue
 		}
@@ -194,7 +409,12 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 			_ = m.logger.LogToolCall(v.Function.Name, v.Function.Arguments)
 		}
 
-		go func(t ToolCall) {
+		if blocked := m.permissionGateResult(tool, v); blocked != nil {
+			ch <- *blocked
+			continue
+		}
+
+		go func(tool Tool, t ToolCall) {
 			result := tool.Execute(ctx, t)
 
 			// Make sure the result has the tool name.
@@ -207,7 +427,7 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 			}
 
 			ch <- result
-		}(v)
+		}(tool, v)
 	}
 
 	results := make([]ToolResult, 0, len(ai.ToolCalls))
@@ -222,6 +442,14 @@ func (m *Chat) RunToolCalls(ai AIMessage) []ToolResult {
 				continue
 			}
 
+		}
+		if result.SkillState != nil {
+			if err := m.ApplySkillState(result.SkillState); err != nil {
+				if m.logger != nil {
+					_ = m.logger.LogError("skill_state", err.Error())
+				}
+				continue
+			}
 		}
 		results = append(results, result)
 	}
@@ -248,13 +476,9 @@ func (m *Chat) RunRequiredDetailFollowUps(results []ToolResult) []ToolResult {
 }
 
 func (m *Chat) runToolByName(name string, args map[string]any) ToolResult {
-	if m.registry == nil || m.registry.tools == nil {
-		return ToolResult{Name: name, Error: errors.New("tool registry is not initialized")}
-	}
-
-	tool, ok := m.registry.tools[name]
-	if !ok {
-		return ToolResult{Name: name, Error: fmt.Errorf("tool not found: %s", name)}
+	tool, err := m.toolForCall(name)
+	if err != nil {
+		return ToolResult{Name: name, Error: err}
 	}
 
 	if m.logger != nil {
@@ -264,6 +488,10 @@ func (m *Chat) runToolByName(name string, args map[string]any) ToolResult {
 	tc := ToolCall{}
 	tc.Function.Name = name
 	tc.Function.Arguments = args
+
+	if blocked := m.permissionGateResult(tool, tc); blocked != nil {
+		return *blocked
+	}
 
 	result := tool.Execute(context.TODO(), tc)
 	if result.Name == "" {
@@ -276,12 +504,74 @@ func (m *Chat) runToolByName(name string, args map[string]any) ToolResult {
 			_ = m.logger.LogError("workflow_state", err.Error())
 		}
 	}
+	if result.SkillState != nil {
+		if err := m.ApplySkillState(result.SkillState); err != nil && m.logger != nil {
+			_ = m.logger.LogError("skill_state", err.Error())
+		}
+	}
 
 	if m.logger != nil {
 		_ = m.logger.LogToolResult(result.Name, result.Response, result.Error)
 	}
 
 	return result
+}
+
+func (m *Chat) toolForCall(name string) (Tool, error) {
+	if m.skillSession != nil && m.skillState != nil && m.skillState.StateName != StateCompleted {
+		tool, ok := m.skillSession.AllowedTools[name]
+		if !ok {
+			return nil, fmt.Errorf("tool %q is not allowed while skill %q is active", name, m.skillState.SkillName)
+		}
+		return tool, nil
+	}
+
+	if m.registry == nil || m.registry.tools == nil {
+		return nil, errors.New("tool registry is not initialized")
+	}
+
+	tool, ok := m.registry.tools[name]
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", name)
+	}
+	return tool, nil
+}
+
+func (m *Chat) permissionGateResult(tool Tool, tc ToolCall) *ToolResult {
+	if tool.Permission() != PermissionRequired {
+		return nil
+	}
+
+	state := m.skillState
+	if state == nil {
+		state = &SkillState{
+			StateName: StateWorking,
+			Status:    SkillStatusWaitingPermission,
+		}
+	} else {
+		state.StateName = StateWorking
+		state.Status = SkillStatusWaitingPermission
+	}
+	state.PendingTool = tc.Function.Name
+	if state.Data == nil {
+		state.Data = make(map[string]any)
+	}
+	state.Data["pending_tool_args"] = tc.Function.Arguments
+
+	if err := m.ApplySkillState(state); err != nil && m.logger != nil {
+		_ = m.logger.LogError("skill_state", err.Error())
+	}
+
+	response := map[string]any{
+		"status":  "permission_required",
+		"tool":    tc.Function.Name,
+		"message": "This tool requires user permission before it can run. Ask the user for approval.",
+	}
+	b, err := json.Marshal(response)
+	if err != nil {
+		return &ToolResult{Name: tc.Function.Name, Error: err, SkillState: state}
+	}
+	return &ToolResult{Name: tc.Function.Name, Response: string(b), SkillState: state}
 }
 
 func (m *Chat) lastUserMessage() string {
@@ -379,5 +669,9 @@ func (m *Chat) AppendAssistantMessage(ai AIMessage) {
 
 func (m *Chat) SetSystemMessage() {
 	m.AppendMessage("system", "", systemPrompt)
+	if m.skillregistry != nil {
+		m.AppendMessage("system", "skill_catalog", m.skillregistry.MakeCatalog())
+	}
 	m.AppendMessage("system", "workflow_state", "")
+	m.AppendMessage("system", "skill_state", "")
 }

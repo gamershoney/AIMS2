@@ -66,7 +66,7 @@ type ModelFunction struct {
 
 type ModelTool struct {
 	Type     string        `json:"type,omitempty"`
-	Function ModelFunction `json:"function,omitzero"`
+	Function ModelFunction `json:"function,omitempty"`
 }
 
 type ToolResult struct {
@@ -112,6 +112,7 @@ type Tool interface {
 	Description() string
 	Parameters() Parameters
 	Execute(ctx context.Context, tc ToolCall) ToolResult
+	Permission() ToolPermission
 }
 
 type WebSearchTool struct {
@@ -154,6 +155,10 @@ func (t *WebSearchTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	}
 	tr.Response, tr.Error = rs()
 	return tr
+}
+
+func (t *WebSearchTool) Permission() ToolPermission {
+	return PermissionNone
 }
 
 func RunWebSearch(qry string) (string, error) {
@@ -348,6 +353,10 @@ func (t *StockCheck) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	return tr
 }
 
+func (t *StockCheck) Permission() ToolPermission {
+	return PermissionNone
+}
+
 type NotesTool struct{}
 
 func (t *NotesTool) Name() string {
@@ -428,6 +437,10 @@ func (t *NotesTool) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	return tr
 }
 
+func (t *NotesTool) Permission() ToolPermission {
+	return PermissionRequired
+}
+
 type PriorityVendor struct{}
 
 func (t *PriorityVendor) Name() string {
@@ -463,6 +476,10 @@ func (t *PriorityVendor) Execute(ctx context.Context, tc ToolCall) ToolResult {
 		clear:          false,
 	}
 	return tr
+}
+
+func (t *PriorityVendor) Permission() ToolPermission {
+	return PermissionNone
 }
 
 type ItemDetails struct{}
@@ -519,8 +536,153 @@ func (t *ItemDetails) Execute(ctx context.Context, tc ToolCall) ToolResult {
 	return tr
 }
 
+func (t *ItemDetails) Permission() ToolPermission {
+	return PermissionNone
+}
+
+type UpdateSkillState struct {
+	State *SkillState
+}
+
+func (t *UpdateSkillState) Name() string {
+	return "update_skill_state"
+}
+
+func (t *UpdateSkillState) Description() string {
+	return "Internal workflow tool. Use during an active skill to record concise progress, warnings, and small structured state. This does not complete the skill."
+}
+
+func (t *UpdateSkillState) Parameters() Parameters {
+	return Parameters{
+		Type: "object",
+		Properties: map[string]Property{
+			"summary":   {Type: "string", Description: "Concise current progress summary."},
+			"state_key": {Type: "string", Description: "Optional small state key to store in skill state data."},
+			"state_value": {
+				Type:        "string",
+				Description: "Optional small state value to store under state_key.",
+			},
+			"warning": {Type: "string", Description: "Optional concise warning or uncertainty to preserve."},
+		},
+	}
+}
+
+func (t *UpdateSkillState) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	tr := ToolResult{Name: tc.Function.Name}
+	if t.State == nil {
+		tr.Error = errors.New("skill state is not initialized")
+		return tr
+	}
+
+	t.State.StateName = StateWorking
+	t.State.Status = SkillStatusActive
+	t.State.PendingTool = ""
+
+	if summary, ok := tc.Function.Arguments["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+		t.State.Summary = summary
+	}
+
+	if warning, ok := tc.Function.Arguments["warning"].(string); ok && strings.TrimSpace(warning) != "" {
+		t.State.Warnings = append(t.State.Warnings, warning)
+	}
+
+	key, hasKey := tc.Function.Arguments["state_key"].(string)
+	value, hasValue := tc.Function.Arguments["state_value"].(string)
+	if hasKey && hasValue && strings.TrimSpace(key) != "" {
+		if t.State.Data == nil {
+			t.State.Data = make(map[string]any)
+		}
+		t.State.Data[key] = value
+	}
+
+	tr.SkillState = t.State
+	b, err := json.Marshal(map[string]any{
+		"status":      "skill_state_updated",
+		"skill_name":  t.State.SkillName,
+		"job_id":      t.State.JobID,
+		"state_name":  t.State.StateName,
+		"summary":     t.State.Summary,
+		"warning_cnt": len(t.State.Warnings),
+	})
+	if err != nil {
+		tr.Error = err
+		return tr
+	}
+	tr.Response = string(b)
+	return tr
+}
+
+func (t *UpdateSkillState) Permission() ToolPermission {
+	return PermissionNone
+}
+
+type CompleteSkill struct {
+	State *SkillState
+}
+
+func (t *CompleteSkill) Name() string {
+	return "complete_skill"
+}
+
+func (t *CompleteSkill) Description() string {
+	return "Internal workflow tool. Use when the active skill has enough information to hand a final concise result back to the parent chat. Requires a user-facing summary."
+}
+
+func (t *CompleteSkill) Parameters() Parameters {
+	return Parameters{
+		Type: "object",
+		Properties: map[string]Property{
+			"summary": {Type: "string", Description: "Required concise final summary to return to the parent chat and user."},
+			"warning": {Type: "string", Description: "Optional final warning, uncertainty, or approval requirement."},
+		},
+		Required: []string{"summary"},
+	}
+}
+
+func (t *CompleteSkill) Execute(ctx context.Context, tc ToolCall) ToolResult {
+	tr := ToolResult{Name: tc.Function.Name}
+	if t.State == nil {
+		tr.Error = errors.New("skill state is not initialized")
+		return tr
+	}
+
+	summary, ok := tc.Function.Arguments["summary"].(string)
+	if !ok || strings.TrimSpace(summary) == "" {
+		tr.Error = errors.New("missing required argument: summary")
+		return tr
+	}
+
+	t.State.StateName = StateCompleted
+	t.State.Status = SkillStatusCompleted
+	t.State.Summary = summary
+	t.State.PendingTool = ""
+	if warning, ok := tc.Function.Arguments["warning"].(string); ok && strings.TrimSpace(warning) != "" {
+		t.State.Warnings = append(t.State.Warnings, warning)
+	}
+
+	tr.SkillState = t.State
+	b, err := json.Marshal(map[string]any{
+		"status":     "skill_completed",
+		"skill_name": t.State.SkillName,
+		"job_id":     t.State.JobID,
+		"summary":    t.State.Summary,
+		"warnings":   t.State.Warnings,
+	})
+	if err != nil {
+		tr.Error = err
+		return tr
+	}
+	tr.Response = string(b)
+	return tr
+}
+
+func (t *CompleteSkill) Permission() ToolPermission {
+	return PermissionNone
+}
+
 type SelectSkill struct {
 	Registry *SkillRegistry
+	Chat     *Chat
 }
 
 func (t *SelectSkill) Name() string {
@@ -543,5 +705,37 @@ func (t *SelectSkill) Parameters() Parameters {
 }
 
 func (t *SelectSkill) Execute(ctx context.Context, tc ToolCall) ToolResult {
-	return ToolResult{}
+	tr := ToolResult{Name: tc.Function.Name}
+	if t.Registry == nil {
+		tr.Error = errors.New("error: skill registry is not initialized")
+		return tr
+	}
+	skill, ok := tc.Function.Arguments["skill_name"].(string)
+	if !ok {
+		tr.Error = errors.New("error: missing skill argument")
+		return tr
+	}
+	reason, ok := tc.Function.Arguments["entered_reason"].(string)
+	if !ok {
+		tr.Error = errors.New("error: missing entered_reason")
+		return tr
+	}
+	selected, ok := t.Registry.Registry[skill]
+	if !ok {
+		tr.Error = errors.New("error: skill not found in registry")
+		return tr
+	}
+	session := t.Registry.RunSkill(selected, reason)
+	if t.Chat != nil {
+		t.Chat.skillSession = session
+	}
+
+	tr.SkillState = session.State
+	tr.Response = fmt.Sprintf(`{"status":"skill_selected","skill_name":%q,"job_id":%d}`, session.State.SkillName, session.State.JobID)
+
+	return tr
+}
+
+func (t *SelectSkill) Permission() ToolPermission {
+	return PermissionNone
 }
