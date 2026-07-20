@@ -2,6 +2,8 @@
 
 AIMS2 is an experimental desktop inventory assistant built with Go and Wails. It combines compact inventory tools, isolated Markdown-defined workflow skills, bounded model/tool loops, explicit workflow state, and user approval gates for state-changing actions.
 
+For the architecture overview, workflow diagram, quick start, and troubleshooting guide, begin with the [repository README](../README.md).
+
 The project is under active development. It is suitable for local experimentation and supervised evaluation, but it is not yet a production purchasing system and does not place orders.
 
 ## Features
@@ -22,7 +24,7 @@ See [AGENTIC_WORKFLOW_ROADMAP.md](AGENTIC_WORKFLOW_ROADMAP.md) for current imple
 - Node.js and npm
 - Wails v2 CLI
 - An Ollama-compatible chat endpoint
-- A local inventory database or import file using your own non-sensitive data
+- A local inventory database using your own non-sensitive data
 
 ## Configuration
 

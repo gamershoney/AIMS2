@@ -24,8 +24,20 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Local configuration and credentials
 .env
+.env.*
+!.env.example
+apikey.env
+
+# Runtime logs and private business data
+*.jsonl
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.xlsx
+*.xls
 
 # Editor/IDE
 # .idea/
