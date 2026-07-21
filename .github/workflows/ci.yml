@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: AIMS2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: AIMS2/go.mod
+          cache-dependency-path: AIMS2/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: AIMS2/frontend/package-lock.json
+      - name: Test Go packages
+        run: go test ./...
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: AIMS2/frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: AIMS2/frontend

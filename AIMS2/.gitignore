@@ -1,0 +1,20 @@
+build/bin
+node_modules
+frontend/dist
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+apikey.env
+
+# Runtime logs may contain conversation and inventory data
+*.jsonl
+*.log
+
+# Private inventory exports and generated databases
+importer/*.db
+importer/*.db-shm
+importer/*.db-wal
+importer/*.xlsx
+importer/*.xls
